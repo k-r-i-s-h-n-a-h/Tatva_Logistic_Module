@@ -1,0 +1,16 @@
+# For building the API
+flask
+
+# For handling the data tables (Excel/CSV)
+pandas
+
+# For spatial/volumetric math
+numpy
+
+fastapi
+
+uvicorn
+
+scikit-learn
+
+joblib
