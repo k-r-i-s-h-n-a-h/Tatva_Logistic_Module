@@ -9,6 +9,13 @@ class LogisticsCalculator:
         self.measurements = self.data.get('measurements', {})
         self.packaging = self.data.get('packaging', {})
         self.order_details = self.data.get('order_details', {})
+        self.items = self.data.get('items', [])
+        self.BULK_DENSITY = {
+            "Loose Sand / Jelly": 1600, 
+            "Bricks": 1900,
+            "Cement Sacks": 1500,
+            "Default_Bulk": 1600
+        }
         
         # Paths to our AI brain
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -44,38 +51,59 @@ class LogisticsCalculator:
             return 5000
 
     def calculate_metrics(self):
-        # 1. Basic Measurements
-        l = self.measurements.get('length', 0)
-        w = self.measurements.get('width', 0)
-        h = self.measurements.get('height', 0)
-        weight = self.measurements.get('actual_weight_kg', 0)
-        qty = self.packaging.get('quantity', 1)
+        total_dead_weight = 0
+        total_volume_cm3 = 0
+        total_volumetric_weight = 0
+        max_dim_overall = 0
+        is_fragile_overall = False
 
-        # 2. Physics Calculations
-        vol = l * w * h * qty
-        density = (weight * qty) / vol if vol > 0 else 0
-        
-        # 3. GET AI DIVISOR
-        feature_set = {
-            "category": self.order_details.get('service_category', 'Interiors'),
-            "shape": "Box" if self.packaging.get('shape') == "N/A" else self.packaging.get('shape', 'Box'),
-            "is_fragile": self.order_details.get('is_fragile', False),
-            "l": l, "w": w, "h": h, "weight": weight, "density": density
-        }
-        
-        divisor = self.get_ai_predicted_divisor(feature_set)
-        
-        # 4. Final Logistics Math
-        volumetric_weight = vol / divisor
-        actual_total_weight = weight * qty
-        chargeable_weight = max(actual_total_weight, volumetric_weight)
+        for item in self.items:
+            qty = item.get('quantity', 1)
+            weight_per_unit = item.get('weight', 0)
+            item_dead_weight = weight_per_unit * qty
+            
+            # --- NEW LOGIC FOR CONSTRUCTION ---
+            if item.get('shape') == "Loose Bulk":
+                # Volume (m3) = Mass / Density
+                material = item.get('material_type', 'Default_Bulk')
+                density = self.BULK_DENSITY.get(material, 1600)
+                
+                volume_m3 = item_dead_weight / density
+                item_vol = volume_m3 * 1000000 # Convert m3 to cm3
+                
+                # For bulk, max dimension is roughly the cube root of volume
+                l = w = h = (item_vol ** (1/3))
+            else:
+                l = item.get('length', 0)
+                w = item.get('width', 0)
+                h = item.get('height', 0)
+                item_vol = l * w * h * qty
+
+            density_calc = item_dead_weight / item_vol if item_vol > 0 else 0
+            
+            feature_set = {
+                "category": item.get('category', 'Interiors'),
+                "shape": "Box" if item.get('shape') in ["N/A", "Loose Bulk"] else item.get('shape', 'Box'),
+                "is_fragile": item.get('is_fragile', False),
+                "l": l, "w": w, "h": h, "weight": weight_per_unit, "density": density_calc
+            }
+            divisor = self.get_ai_predicted_divisor(feature_set)
+            
+            total_dead_weight += item_dead_weight
+            total_volume_cm3 += item_vol
+            total_volumetric_weight += (item_vol / divisor)
+            max_dim_overall = max(max_dim_overall, l, w, h)
+            if item.get('is_fragile'): is_fragile_overall = True
+
+        chargeable_weight = max(total_dead_weight, total_volumetric_weight)
 
         return {
-            "total_dead_weight_kg": round(actual_total_weight, 2),
-            "total_volume_cm3": round(vol, 2),
+            "total_dead_weight_kg": round(total_dead_weight, 2),
+            "total_volume_cm3": round(total_volume_cm3, 2),
             "chargeable_weight_kg": math.ceil(chargeable_weight),
-            "dynamic_divisor_used": divisor,
-            "max_dimension_cm": max(l, w, h),
-            "is_fragile": feature_set['is_fragile'],
-            "ai_mode": True # Just to track it's using the model
+            "dynamic_divisor_used": "Mixed (AI per item)",
+            "max_dimension_cm": round(max_dim_overall, 2),
+            "is_fragile": is_fragile_overall,
+            "item_count": len(self.items),
+            "ai_mode": True
         }
