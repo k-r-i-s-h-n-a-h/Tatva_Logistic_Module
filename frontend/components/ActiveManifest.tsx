@@ -37,7 +37,8 @@ export function ActiveManifest({ items, onRemoveItem }: ActiveManifestProps) {
             <div className="flex-1">
               <div className="flex gap-2 items-center">
                 <span className="font-medium text-sm">
-                  {item.materialType ? MATERIAL_MAP[item.materialType as keyof typeof MATERIAL_MAP] : 'Custom Item'}
+                  {/* ⬇️ CHANGED FROM item.materialType ⬇️ */}
+                  {item.material_type ? item.material_type : 'Custom Item'}
                 </span>
                 {item.quantity > 1 && (
                   <Badge variant="outline" className="text-xs">

@@ -5,12 +5,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { OptimizationResult } from '@/lib/logistics'
 import { Truck, Zap, Box, TrendingUp } from 'lucide-react'
+import { Ship as ShipIcon } from 'lucide-react'
+
+
+interface Courier {
+  courier_name: string;
+  rate: number;
+  etd: string;
+  courier_company_id: number;
+  rating: number;
+}
 
 interface ResultsDashboardProps {
   result: OptimizationResult | null
+  quotes?: Courier[]
+  onSelectCourier?: (courier: Courier) => void
 }
 
-export function ResultsDashboard({ result }: ResultsDashboardProps) {
+export function ResultsDashboard({ result, quotes = [], onSelectCourier = () => {} }: ResultsDashboardProps) {
   if (!result) {
     return (
       <Card>
@@ -86,6 +98,44 @@ export function ResultsDashboard({ result }: ResultsDashboardProps) {
           </div>
         </CardContent>
       </Card>
+
+
+      {quotes.length > 0 && (
+        <div className="mt-8 space-y-4">
+          <h3 className="text-xl font-bold flex items-center gap-2">
+            <ShipIcon className="w-5 h-5" /> Live Courier Quotes (via Shiprocket)
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {quotes.map((courier: Courier) => (
+              <div 
+                key={courier.courier_company_id}
+                className="p-4 border rounded-xl hover:border-blue-500 transition-all cursor-pointer bg-white shadow-sm group"
+                onClick={() => onSelectCourier(courier)}
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-bold text-lg group-hover:text-blue-600">
+                      {courier.courier_name}
+                    </p>
+                    <p className="text-sm text-gray-500">Delivery by: {courier.etd}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-black text-green-600">₹{courier.rate}</p>
+                    <div className="flex items-center gap-1 text-yellow-500 text-xs">
+                      <span>⭐</span> {courier.rating}
+                    </div>
+                  </div>
+                </div>
+                
+                <button className="w-full mt-4 py-2 bg-black text-white rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                  Select & Book
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
