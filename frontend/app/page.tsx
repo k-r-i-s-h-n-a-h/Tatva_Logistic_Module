@@ -151,7 +151,8 @@ const handleFetchQuotes = async (currentResult: OptimizationResult | null) => {
         
         {/* Header */}
         <div className="text-center md:text-left mb-10">
-          <h1 className="text-4xl font-black uppercase tracking-tight mb-2">Logistics & Fleet Optimizer</h1>
+          <h1 className="text-4xl font-black uppercase tracking-tight mb-2">TATVA CONNECT</h1>
+          <h1 className="text-2xl font-black uppercase tracking-tight mb-2">A Logistics & Fleet Optimizer</h1>
           <p className="text-muted-foreground text-lg">Optimize your delivery routes and fleet management</p>
         </div>
 
