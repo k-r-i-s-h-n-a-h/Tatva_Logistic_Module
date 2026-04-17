@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { OptimizationResult } from '@/lib/logistics'
 import { Truck, Zap, Box, TrendingUp } from 'lucide-react'
 import { Ship as ShipIcon } from 'lucide-react'
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 
 
 interface Courier {
@@ -17,149 +19,127 @@ interface Courier {
 }
 
 interface ResultsDashboardProps {
-  result: OptimizationResult | null
-  quotes?: Courier[]
-  onSelectCourier?: (courier: Courier) => void
+  result: OptimizationResult | null;
+  quotes?: any[];
+  mode: 'courier' | 'trucking' | null;
+  onSelectCourier?: (courier: any) => void; // Add this line
 }
 
-export function ResultsDashboard({ result, quotes = [], onSelectCourier = () => {} }: ResultsDashboardProps) {
+export function ResultsDashboard({ result, quotes = [], mode }: ResultsDashboardProps) {
+  const title = mode === 'trucking' ? "Freight Matching Results" : "Shipping Summary";
+
   if (!result) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wide">Optimization Results</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">Optimize your logistics to see results</p>
-        </CardContent>
+      <Card className="border-2 border-dashed border-slate-200">
+        <CardHeader><CardTitle className="text-sm uppercase">{title}</CardTitle></CardHeader>
+        <CardContent><p className="text-xs text-muted-foreground italic">Manifest empty. Add items to calculate.</p></CardContent>
       </Card>
-    )
+    );
   }
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs uppercase tracking-wide font-semibold flex items-center gap-2">
-              <Box className="h-4 w-4 text-primary" />
-              Chargeable Weight
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{result.chargeableWeight.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">kg</p>
-          </CardContent>
+        {/* ALWAYS SHOW: Weight & Distance */}
+        <Card className="p-4 border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <Label className="text-[10px] font-black uppercase text-slate-500">chargeable Weight</Label>
+          <div className="text-2xl font-black">{result.chargeableWeight.toFixed(2)} <span className="text-sm">kg</span></div>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs uppercase tracking-wide font-semibold flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              Cargo Volume
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{result.cargoVolume.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">m³</p>
-          </CardContent>
+        <Card className="p-4 border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <Label className="text-[10px] font-black uppercase text-slate-500">Distance</Label>
+          <div className="text-2xl font-black">{result.fleetMatch?.distance || 0} <span className="text-sm">km</span></div>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wide flex items-center gap-2">
-            <Truck className="h-5 w-5 text-primary" />
-            Fleet Matching Success
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="font-semibold text-sm">{result.fleetMatch.vehicle}</p>
-              <p className="text-xs text-muted-foreground mt-1">Recommended Vehicle</p>
-            </div>
-            <Badge className="bg-primary text-primary-foreground">Available</Badge>
-          </div>
+      {/* ONLY SHOW IN TRUCKING MODE: Volume & Vehicle */}
+      {mode === 'trucking' && (
+        <>
+          <Card className="p-4 border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <Label className="text-[10px] font-black uppercase text-slate-500">Cargo Volume</Label>
+            <div className="text-2xl font-black">{result.cargoVolume.toFixed(2)} <span className="text-sm">m³</span></div>
+          </Card>
 
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-1">
-                Estimated Fare
-              </p>
-              <p className="text-xl font-bold text-primary">₹{result.fleetMatch.fare}</p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-1">
-                Distance
-              </p>
-              <p className="text-xl font-bold text-primary">{result.fleetMatch.distance} km</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-
-      {quotes.length > 0 && (
-        <div className="mt-8 space-y-4">
-          <h3 className="text-xl font-bold flex items-center gap-2">
-            <ShipIcon className="w-5 h-5" /> Live Courier Quotes (via Shiprocket)
-          </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {quotes.map((courier: Courier) => (
-              <div 
-                key={courier.courier_company_id}
-                className="p-4 border rounded-xl hover:border-blue-500 transition-all cursor-pointer bg-white shadow-sm group"
-                onClick={() => onSelectCourier(courier)}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-bold text-lg group-hover:text-blue-600">
-                      {courier.courier_name}
-                    </p>
-                    <p className="text-sm text-gray-500">Delivery by: {courier.etd}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-black text-green-600">₹{courier.rate}</p>
-                    <div className="flex items-center gap-1 text-yellow-500 text-xs">
-                      <span>⭐</span> {courier.rating}
-                    </div>
-                  </div>
+          <Card className="p-6 border-2 border-black bg-slate-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+             <div className="flex justify-between items-start mb-4">
+                <h3 className="font-black uppercase tracking-tighter">Recommended Fleet</h3>
+                <Badge className="bg-green-600">Available</Badge>
+             </div>
+             <div className="text-xl font-bold">{result.fleetMatch?.vehicle || "Not Specified"}</div>
+             <div className="mt-4 flex justify-between border-t pt-4 border-slate-200">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400">EST. FARE</p>
+                  <p className="text-lg font-black">₹{result.fleetMatch?.fare}</p>
                 </div>
-                
-                <button className="w-full mt-4 py-2 bg-black text-white rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                  Select & Book
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+                <Button className="bg-black text-white px-6">Book Truck</Button>
+             </div>
+          </Card>
+        </>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wide flex items-center gap-2">
-            <Zap className="h-5 w-5 text-primary" />
-            AI Expert Stacking Protocol
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {[
-            'Optimized weight distribution for fuel efficiency',
-            'Maximum space utilization achieved',
-            'Climate-controlled storage recommended',
-            'Real-time tracking enabled',
-          ].map((tip, index) => (
-            <div key={index} className="flex gap-3">
-              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span className="text-xs font-semibold text-primary">{index + 1}</span>
-              </div>
-              <p className="text-sm text-foreground">{tip}</p>
+      {/* ─── COURIER QUOTES (Shiprocket Integration) ─── */}
+      {mode === 'courier' && (
+        <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex items-center gap-2">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Available Live Carriers
+            </h4>
+            <div className="h-[1px] flex-1 bg-slate-100"></div>
+          </div>
+
+          {quotes.length === 0 ? (
+            <div className="p-8 border-2 border-dashed border-slate-200 rounded-lg text-center">
+              <p className="text-xs italic text-slate-400">
+                Searching Shiprocket network for best rates...
+              </p>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+          ) : (
+            <div className="space-y-3">
+              {quotes.map((quote, idx) => (
+                <div 
+                  key={idx} 
+                  className="group relative flex justify-between items-center p-4 border-2 border-black bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  {/* Badge for the first (usually cheapest) quote */}
+                  {idx === 0 && (
+                    <span className="absolute -top-2 -left-2 bg-green-600 text-white text-[8px] font-black px-2 py-0.5 rounded-sm uppercase tracking-tighter">
+                      Best Value
+                    </span>
+                  )}
+
+                  <div className="space-y-1">
+                    <p className="font-black text-sm uppercase tracking-tighter leading-none">
+                      {quote.courier_name}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        Delivery: {quote.etd}
+                      </span>
+                      <span className="text-slate-200 text-xs">|</span>
+                      <div className="text-[10px] text-amber-500 font-bold">
+                        ⭐ {quote.rating}/5
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-xl font-black text-green-600 leading-none">
+                      ₹{quote.rate}
+                    </p>
+                    <button className="mt-1 text-[9px] font-bold uppercase text-blue-600 hover:underline">
+                      Select and Book
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          <p className="text-[9px] text-slate-400 text-center italic">
+            * Rates provided via Shiprocket MCP Server
+          </p>
+        </div>
+      )}
     </div>
-  )
+  );
 }

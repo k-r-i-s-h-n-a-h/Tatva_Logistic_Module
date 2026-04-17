@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import asyncio
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
+import math
 
 # ... rest of your code ...
 
@@ -314,21 +315,50 @@ async def estimate_metrics(payload: dict):
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 3 — RECOMMEND
 # ─────────────────────────────────────────────────────────────────────────────
+#helpinfg function to calculate distance between two pincodes (mock implementation)
+def get_distance(p1: str, p2: str):
+    # This is a mock database of pincode coordinates
+    # In a real app, you'd use a CSV or Google Maps API
+    PIN_COORDS = {
+        "400001": (18.9218, 72.8335), # Mumbai
+        "530001": (17.7041, 83.2977), # Visakhapatnam
+        "560001": (12.9716, 77.5946), # Bangalore
+        "110001": (28.6139, 77.2090), # Delhi
+    }
+
+    # If pincode not in our mock list, return a random realistic distance
+    if p1 not in PIN_COORDS or p2 not in PIN_COORDS:
+        return 450.0 
+
+    lat1, lon1 = PIN_COORDS[p1]
+    lat2, lon2 = PIN_COORDS[p2]
+
+    # Haversine formula to calculate distance in km
+    radius = 6371 
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) * math.sin(dlat / 2) +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) * math.sin(dlon / 2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return round(radius * c, 2)
 
 @app.post("/vehicle/recommend")
-async def recommend_vehicle(payload: dict):
-    metrics = payload.get("metrics")
-    items   = payload.get("items")
-    rec     = optimizer.recommend_vehicle(metrics, payload)
-    expert  = analyst.get_expert_review(metrics, items, rec["vehicle"])
-
-    if expert and expert.get("override_vehicle") != "None":
-        rec["vehicle"]         = expert["override_vehicle"]
-        rec["reasoning_note"]  = expert.get("reasoning")
-        rec["stacking_advice"] = expert.get("stacking_plan")
-
-    return rec
-
+async def recommend_vehicle(data: dict):
+    # 1. Get route info from the request
+    route = data.get("route", {})
+    p1 = route.get("pickup_pincode", "400001")
+    p2 = route.get("delivery_pincode", "400001")
+    
+    # 2. Calculate actual distance
+    distance_km = get_distance(p1, p2)
+    
+    # 3. Rest of your recommendation logic...
+    return {
+        "vehicle": "3-Wheeler" if distance_km < 50 else "Tata Ace",
+        "distance_text": f"{distance_km} km",
+        "estimated_fare": f"₹{distance_km * 12 + 300}" # Example fare math
+    }
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 4 — MCP SHIPROCKET QUOTE 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -6,97 +6,61 @@ import { ManualEntry } from "@/components/ManualEntry"
 import { ActiveManifest } from "@/components/ActiveManifest"
 import { RouteInformation } from "@/components/RouteInformation"
 import { ResultsDashboard } from "@/components/ResultsDashboard"
-import AutoCapture from "@/components/AutoCapture" // The one we built previously
+import AutoCapture from "@/components/AutoCapture"
 import { DeliveryItem, RouteInfo, OptimizationResult } from "@/lib/logistics"
 import { Button } from "@/components/ui/button"
+import { GoogleMapsPicker } from "@/components/GoogleMapsPicker"
 
 export default function Home() {
-  // 1. App State
-  const [calcMode, setCalcMode] = useState<'auto' | 'manual'>('auto');
+  const [serviceType, setServiceType] = useState<'courier' | 'trucking' | null>(null);
   const [items, setItems] = useState<DeliveryItem[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInfo>({ pickupPincode: '', deliveryPincode: '' });
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [carrierQuotes, setCarrierQuotes] = useState<any[]>([]);
   const [isFetchingQuotes, setIsFetchingQuotes] = useState(false);
-  
-
   const [quoteError, setQuoteError] = useState<string | null>(null);
-
-  // AI Extracted Dimensions State
   const [autoDims, setAutoDims] = useState({ l: "", w: "", h: "" });
+  const [truckLocations, setTruckLocations] = useState({ pickup: null, delivery: null });
 
-  // 2. Handlers
-  const handleRemoveItem = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
+  // ─── HANDLERS ──────────────────────────────────────────────────────────
+
+  const handleAddItem = (newItem: DeliveryItem) => {
+    const itemWithId = { ...newItem, id: Date.now().toString() };
+    setItems((prev) => [...prev, itemWithId]);
+    setResult(null);
+    setCarrierQuotes([]);
   };
 
-  const handleDimensionsFound = (dims: { l?: string; w?: string; h?: string }) => {
+  const handleLocationSelect = (type: 'pickup' | 'delivery', placeData: any) => {
+    setTruckLocations(prev => ({ ...prev, [type]: placeData }));
+    const pincode = placeData.address_components?.find((c: any) => c.types.includes("postal_code"))?.long_name;
+    if (pincode) {
+      setRouteInfo(prev => ({ ...prev, [type === 'pickup' ? 'pickupPincode' : 'deliveryPincode']: pincode }));
+    }
+  };
+
+  const handleDimensionsFound = (dims: { l?: string; w?: string; h?: string; weight?: string }) => {
     setAutoDims(prev => ({
       l: dims.l || prev.l,
       w: dims.w || prev.w,
       h: dims.h || prev.h
     }));
-  };
 
-  const handleOptimize = async () => {
-  if (items.length === 0) return alert("Please add items to manifest.");
-  setIsLoading(true);
-  
-  try {
-    // Step 1: Metrics Estimation
-    const estRes = await fetch("http://127.0.0.1:8001/cargo/estimate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    });
-    if (!estRes.ok) throw new Error("Estimate API failed");
-    const estData = await estRes.json();
-
-    // Step 2: Vehicle Recommendation
-    const recRes = await fetch("http://127.0.0.1:8001/vehicle/recommend", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ metrics: estData.metrics, items, route: routeInfo }),
-    });
-    if (!recRes.ok) throw new Error("Recommend API failed");
-    const recData = await recRes.json();
-
-    // Step 3: Local Volume Calculation (Backup)
-    const calculatedVolumeM3 = items.reduce((total, item) => {
-      return total + ((item.length * item.width * item.height) / 1000000 * item.quantity);
-    }, 0);
-
-    // Step 4: Construct the Result Object
-    const newResult = {
-      chargeableWeight: estData.metrics.chargeable_weight_kg || 0,
-      cargoVolume: estData.metrics.total_volume_cbm || calculatedVolumeM3,
-      fleetMatch: {
-        vehicle: recData.vehicle,
-        fare: parseInt(recData.estimated_fare.replace(/[^0-9]/g, '')) || 0,
-        distance: parseFloat(recData.distance_text) || 15 
-      }
-    };
-
-    setResult(newResult);
-
-    // Step 5: Trigger MCP Shiprocket Quotes using the NEW result
-    await handleFetchQuotes(newResult); 
-
-  } catch (error) {
-    console.error("Optimization failed", error);
-    alert("Check terminal: Is FastAPI running?");
-  } finally {
-    setIsLoading(false);
+  // If weight is passed from the AutoCapture form, save it to the main weight state
+  if (dims.weight) {
+    // Assuming your weight state in page.tsx is named 'weight'
+    // If you don't have a separate weight state, you'll need to create one
+    // or handle it within your 'items' logic.
   }
 };
 
-  // Inside your Home component in app/page.tsx
-
-const handleFetchQuotes = async (currentResult: OptimizationResult | null) => {
+  const handleFetchQuotes = async (currentResult: OptimizationResult | null) => {
   const targetResult = currentResult || result;
   if (!targetResult) return;
   
   setIsFetchingQuotes(true);
-  setQuoteError(null); // Reset error state at the start of a new request
+  setQuoteError(null);
 
   try {
     const res = await fetch("http://127.0.0.1:8001/carrier/quote", {
@@ -111,98 +75,179 @@ const handleFetchQuotes = async (currentResult: OptimizationResult | null) => {
 
     const mcpWrapper = await res.json();
     
-    // Safety check for empty or malformed MCP data
-    if (!mcpWrapper.data || mcpWrapper.data.length === 0) {
-      throw new Error("No data received from MCP server");
-    }
-
+    // ─── THE CRITICAL FIX: Parsing the inner 'text' string ───
     const shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
 
-    // ── 1. CHECK FOR ERRORS FIRST (The Guard Clause) ──
-    if (shiprocketResponse.status === 404 || !shiprocketResponse.data?.available_courier_companies) {
-      setCarrierQuotes([]);
-      setQuoteError(shiprocketResponse.message || "Bulk Shipment: Standard couriers do not support this load.");
-      return; // Stop here!
+    // Check if Shiprocket actually returned courier companies
+    if (shiprocketResponse.status === 200 && shiprocketResponse.data?.available_courier_companies) {
+      const companies = shiprocketResponse.data.available_courier_companies;
+      
+      const formattedQuotes = companies.map((c: any) => ({
+        courier_name: c.courier_name,
+        rate: c.rate,
+        etd: c.etd || `${c.estimated_delivery_days} Days`,
+        courier_company_id: c.courier_company_id,
+        rating: parseFloat(c.rating) || 0
+      }));
+
+      setCarrierQuotes(formattedQuotes);
+    } else {
+      setQuoteError(shiprocketResponse.message || "No couriers available for this route.");
     }
 
-    // ── 2. IF SUCCESSFUL, MAP THE DATA ──
-    const companies = shiprocketResponse.data.available_courier_companies;
-    const formattedQuotes = companies.map((c: any) => ({
-      courier_name: c.courier_name,
-      rate: c.rate,
-      etd: c.etd || `${c.estimated_delivery_days} Days`,
-      courier_company_id: c.courier_company_id,
-      rating: parseFloat(c.rating) || 0
-    }));
-
-    setCarrierQuotes(formattedQuotes);
-
   } catch (error) {
-    console.error("Critical Parsing Error:", error);
-    setQuoteError("Service Temporarily Unavailable: Check terminal for MCP connection.");
+    console.error("Parsing Error:", error);
+    setQuoteError("Unable to process carrier data. Check console.");
   } finally {
     setIsFetchingQuotes(false);
   }
 };
 
+  const handleOptimize = async () => {
+    if (items.length === 0) return alert("Please add items to manifest.");
+    setIsLoading(true);
+    try {
+      const estRes = await fetch("http://127.0.0.1:8001/cargo/estimate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const estData = await estRes.json();
+
+      const recRes = await fetch("http://127.0.0.1:8001/vehicle/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          metrics: estData.metrics, 
+          items, 
+          // Ensure this matches your FastAPI Pydantic model!
+          route: {
+            pickup_pincode: routeInfo.pickupPincode,
+            delivery_pincode: routeInfo.deliveryPincode
+          }
+        }),
+      });
+      const recData = await recRes.json();
+
+      const newResult = {
+        chargeableWeight: estData.metrics.chargeable_weight_kg || 0,
+        cargoVolume: estData.metrics.total_volume_cbm || 0,
+        fleetMatch: {
+          vehicle: recData.vehicle,
+          fare: parseInt(recData.estimated_fare.replace(/[^0-9]/g, '')) || 0,
+          distance: parseFloat(recData.distance_text) || 15 
+        }
+      };
+      setResult(newResult);
+      await handleFetchQuotes(newResult); 
+    } catch (error) {
+      alert("Check terminal: Is FastAPI running?");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+const handleRemoveItem = (id: string) => {
+  // Use a functional update to ensure we have the latest state
+  setItems((prevItems) => {
+    const updatedItems = prevItems.filter((item) => item.id !== id);
+    console.log(`Item ${id} removed. New count: ${updatedItems.length}`);
+    return updatedItems;
+  });
+
+  // Also clear results if the manifest is now empty
+  if (items.length <= 1) {
+    setResult(null);
+    setCarrierQuotes([]);
+  }
+};
+
+const handleBookCourier = (courier: any) => {
+  console.log("Booking initiated for:", courier.courier_name);
+  // Future logic: call /carrier/book endpoint
+};
+  // ─── RENDER SELECTION CARDS ──────────────────────────────────────────
+
+  if (!serviceType) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen space-y-8 p-6 bg-gray-50">
+        <h1 className="text-4xl font-black uppercase tracking-tight text-center">...Tatva Connect...</h1>
+        <h2 className="text-4xl font-black uppercase tracking-tight text-center">How can we help you today?</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
+          <button onClick={() => setServiceType('courier')} className="group p-10 border-4 border-black bg-white hover:bg-black hover:text-white transition-all text-left shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <div className="text-5xl mb-4">📦</div>
+            <h3 className="text-2xl font-bold uppercase mb-2">Send a Parcel</h3>
+            <p className="opacity-70">Small boxes and packages. AI-powered measurements for express courier networks.</p>
+          </button>
+          <button onClick={() => setServiceType('trucking')} className="group p-10 border-4 border-black bg-white hover:bg-black hover:text-white transition-all text-left shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <div className="text-5xl mb-4">🚛</div>
+            <h3 className="text-2xl font-bold uppercase mb-2">Hire a Truck</h3>
+            <p className="opacity-70">Heavy material and construction goods. Professional freight fleet matching.</p>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── RENDER MAIN APP ────────────────────────────────────────────────
+
   return (
     <div className="min-h-screen bg-background py-12 px-4 font-sans text-foreground">
       <div className="max-w-[1200px] mx-auto space-y-8">
-        
-        {/* Header */}
-        <div className="text-center md:text-left mb-10">
-          <h1 className="text-4xl font-black uppercase tracking-tight mb-2">TATVA CONNECT</h1>
-          <h1 className="text-2xl font-black uppercase tracking-tight mb-2">A Logistics & Fleet Optimizer</h1>
-          <p className="text-muted-foreground text-lg">Optimize your delivery routes and fleet management</p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-black uppercase tracking-tight mb-2">Logistics Optimizer</h1>
+            <p className="text-muted-foreground font-medium">Expert guidance for your {serviceType} needs</p>
+          </div>
+          <button onClick={() => setServiceType(null)} className="text-xs font-bold uppercase tracking-widest border-2 border-black px-4 py-2 hover:bg-black hover:text-white transition-all w-fit">
+            ← Switch Service
+          </button>
         </div>
 
-        {/* Navigation / Mode Selection */}
-        <ModeSelector mode={calcMode} setMode={setCalcMode} />
-
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          
-          {/* LEFT COLUMN: Inputs */}
           <div className="lg:col-span-7 space-y-6">
-            
-            {calcMode === 'auto' && (
-              <AutoCapture onDimensionsUpdate={handleDimensionsFound} />
+            {serviceType === 'courier' ? (
+              <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-500">
+                <div className="bg-blue-50 p-4 border-l-4 border-blue-600 text-blue-800 text-sm font-bold flex items-center gap-2">
+                  <span>📦</span> COURIER MODE: Use AI Image Capture for Box Dimensions
+                </div>
+                <AutoCapture
+                  onDimensionsUpdate={handleDimensionsFound}
+                  onAddItem={handleAddItem} // <--- Very important!
+                  items={items}             // <--- To show the list
+                  onRemoveItem={handleRemoveItem}
+                />
+                <RouteInformation routeInfo={routeInfo} onChange={setRouteInfo} />
+              </div>
+            ) : (
+              <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-500">
+                <div className="bg-green-50 p-4 border-l-4 border-green-600 text-green-800 text-sm font-bold flex items-center gap-2">
+                  <span>🚛</span> TRUCKING MODE: Manual Entry + Precise Map Locations
+                </div>
+                <ManualEntry mode="manual" onAddItem={handleAddItem} prefilledDims={autoDims} />
+                {/* ─── THE "CART" VIEW ─── */}
+                {items.length > 0 && (
+                  <div className="animate-in slide-in-from-bottom-4 duration-500">
+                    <h3 className="text-sm font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <span>🛒</span> Current Manifest ({items.length} items)
+                    </h3>
+                    <ActiveManifest items={items} onRemoveItem={handleRemoveItem} />
+                  </div>
+                )}
+                <GoogleMapsPicker onLocationSelect={handleLocationSelect} />
+              </div>
             )}
 
-            <ManualEntry 
-              mode={calcMode} 
-              onAddItem={(item) => setItems([...items, item])} 
-              prefilledDims={autoDims} 
-            />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ActiveManifest items={items} onRemoveItem={handleRemoveItem} />
-              <RouteInformation routeInfo={routeInfo} onChange={setRouteInfo} />
-            </div>
-
-            <Button 
-              onClick={handleOptimize} 
-              disabled={isLoading || items.length === 0}
-              className="w-full h-14 text-md font-black uppercase tracking-widest"
-              size="lg"
-            >
-              {isLoading ? "Optimizing..." : "Optimize Logistics"}
+            <Button onClick={handleOptimize} disabled={isLoading || items.length === 0} className="w-full h-16 text-lg font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all">
+              {isLoading ? "Analyzing Cargo..." : "Get Live Quotes"}
             </Button>
+            {quoteError && <div className="p-4 bg-red-50 border-2 border-red-200 text-red-700 text-sm font-bold">{quoteError}</div>}
           </div>
 
-          {/* RIGHT COLUMN: Results */}
           <div className="lg:col-span-5 sticky top-8">
-             <ResultsDashboard result={result} quotes={carrierQuotes}/>
+             <ResultsDashboard result={result} quotes={carrierQuotes} mode={serviceType} onSelectCourier={handleBookCourier} />
           </div>
-
-          {/* Add this simple alert message below the dashboard if there's an error */}
-          {quoteError && (
-            <div className="mt-4 p-4 bg-orange-50 border-l-4 border-orange-500 text-orange-700 text-sm">
-              <strong>Logistics Note:</strong> {quoteError}
-            </div>
-          )}
-
         </div>
       </div>
     </div>
-  )
+  );
 }

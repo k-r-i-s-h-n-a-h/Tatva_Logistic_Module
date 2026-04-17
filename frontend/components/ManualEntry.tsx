@@ -5,28 +5,26 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { ITEM_STANDARDS, MATERIAL_MAP, DeliveryItem } from '@/lib/logistics'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 
-// 1. ADD 'mode' AND 'label' TO PROPS
 interface ManualEntryProps {
   mode: 'auto' | 'manual'; 
   onAddItem: (item: DeliveryItem) => void;
   prefilledDims: { l: string; w: string; h: string; label?: string };
 }
 
-// 2. DESTRUCTURE 'mode' HERE
 export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps) {
-  const [service, setService] = useState<string>(Object.keys(MATERIAL_MAP)[0]);
+  // Initialize with empty strings to allow the "Select..." placeholder to show up
+  const [service, setService] = useState<string>("");
   const [material, setMaterial] = useState<string>("");
-
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [h, setH] = useState("");
   const [weight, setWeight] = useState("");
   const [qty, setQty] = useState("1");
-  
   const [isFixed, setIsFixed] = useState(false);
 
-  // Auto-fill dims ONLY if in Auto Mode
+  // Auto-fill logic for VLM mode
   useEffect(() => {
     if (!isFixed && mode === 'auto') {
       if (prefilledDims.l) setL(prefilledDims.l);
@@ -35,9 +33,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
     }
   }, [prefilledDims, isFixed, mode]);
 
-  useEffect(() => { setMaterial(""); }, [service]);
-
-  // Apply standard dimensions ONLY in Manual Mode
+  // Standard size logic for Manual mode
   useEffect(() => {
     if (mode === 'manual' && material && ITEM_STANDARDS[material]) {
       const std = ITEM_STANDARDS[material];
@@ -48,114 +44,159 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
     }
   }, [material, mode]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    let finalMaterial = material;
-    let finalCategory = service;
-
-    // 3. SMART SUBMIT LOGIC: Bypass dropdown check if in Auto mode
-    if (mode === 'auto') {
-      finalMaterial = prefilledDims.label || "Auto-Detected Cargo";
-      finalCategory = "AI Vision Scan";
-    } else {
-      if (!material) return alert("Please select a material type.");
+  // THE MASTER SAVE FUNCTION
+  const processAddition = () => {
+    if (!material || !weight) {
+      alert("Please fill in material and weight before adding.");
+      return false;
     }
-
-    const isBulk = finalMaterial.includes("(Bulk)");
-    const finalQty = parseInt(qty) || 1;
-    const shape = isBulk ? "Loose Bulk" : "Box";
 
     const newItem: DeliveryItem = {
       id: Math.random().toString(36).substring(2, 9),
-      material_type: finalMaterial,
-      category: finalCategory,
+      material_type: material,
+      category: service,
       length: parseFloat(l) || 0,
       width: parseFloat(w) || 0,
       height: parseFloat(h) || 0,
       weight: parseFloat(weight) || 0,
-      quantity: finalQty,
-      shape: shape,
-      is_fragile: finalMaterial.includes("Glass") || finalMaterial.includes("Electronics")
+      quantity: parseInt(qty) || 1,
+      shape: material.includes("(Bulk)") ? "Loose Bulk" : "Box",
+      is_fragile: material.includes("Liquid") || material.includes("Glass") || material.includes("Fragile")
     };
-    
+
     onAddItem(newItem);
+
+    // TOTAL RESET: Clear everything for a fresh start
+    setService("");
     setMaterial("");
+    setL("");
+    setW("");
+    setH("");
+    setWeight("");
+    setQty("1");
+    return true;
   };
 
-  const selectClass = "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  const handlePlusClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (processAddition()) {
+      console.log("Item saved. Form ready for next separate item.");
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    processAddition();
+  };
+
+  const selectClass = "flex h-12 w-full items-center justify-between rounded-md border-2 border-slate-200 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black";
 
   return (
-    <Card>
+    <Card className="border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
       <CardHeader>
-        <CardTitle className="text-base uppercase tracking-wide flex justify-between items-center">
+        <CardTitle className="text-base uppercase tracking-widest flex justify-between items-center font-black">
           Cargo Details
-          {isFixed && mode === 'manual' && <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-1 rounded-full font-bold">Standard Size Applied</span>}
+          {isFixed && mode === 'manual' && (
+            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-1 rounded-full border border-amber-300">
+              Standard Size Applied
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           
-          {/* 4. CONDITIONALLY RENDER DROPDOWNS: Only show in 'manual' mode */}
-          {mode === 'manual' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div className="space-y-2">
-                <Label className="uppercase text-xs font-semibold tracking-wide">Service Category</Label>
-                <select value={service} onChange={(e) => setService(e.target.value)} className={selectClass}>
-                  {Object.keys(MATERIAL_MAP).map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="uppercase text-xs font-semibold tracking-wide">Product / Material</Label>
-                <select value={material} onChange={(e) => setMaterial(e.target.value)} className={selectClass} required>
-                  <option value="" disabled>Select material...</option>
-                  {MATERIAL_MAP[service as keyof typeof MATERIAL_MAP]?.map((mat) => (
-                    <option key={mat} value={mat}>{mat}</option>
-                  ))}
-                </select>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="uppercase text-[10px] font-bold tracking-widest text-slate-500">Service Category</Label>
+              <select 
+                value={service} 
+                onChange={(e) => {
+                  setService(e.target.value);
+                  setMaterial(""); // Reset material when category changes
+                }} 
+                className={selectClass}
+              >
+                <option value="" disabled>Select Category...</option>
+                {Object.keys(MATERIAL_MAP).map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
             </div>
-          )}
 
-          <div className="space-y-2 pt-2">
-            <Label className="uppercase text-xs font-semibold tracking-wide">No. of Items / Units</Label>
+            <div className="space-y-2">
+              <Label className="uppercase text-[10px] font-bold tracking-widest text-slate-500">Product / Material</Label>
+              <Select value={material} onValueChange={setMaterial}>
+                <SelectTrigger className="h-12 border-2 border-slate-200">
+                  <SelectValue placeholder="Select Material..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {service && MATERIAL_MAP[service as keyof typeof MATERIAL_MAP] ? (
+                    MATERIAL_MAP[service as keyof typeof MATERIAL_MAP].map((mat) => (
+                      <SelectItem key={mat} value={mat}>{mat}</SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="none" disabled>Select category first</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="uppercase text-[10px] font-bold tracking-widest text-slate-500">No. of Items / Units</Label>
             <Input 
               type="number" 
-              min="1" 
               value={qty} 
               onChange={(e) => setQty(e.target.value)} 
-              //disabled={mode === 'manual' && material.includes("(Bulk)")} 
-              //className={mode === 'manual' && material.includes("(Bulk)") ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""}
+              className="h-12 border-2 border-slate-200"
               required 
             />
           </div>
 
-          {/* DIMENSIONS */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
-            <div className="space-y-2">
-              <Label>L (cm)</Label>
-              <Input type="number" value={l} onChange={(e) => setL(e.target.value)} disabled={isFixed && mode === 'manual'} className={isFixed && mode === 'manual' ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""} required />
-            </div>
-            <div className="space-y-2">
-              <Label>W (cm)</Label>
-              <Input type="number" value={w} onChange={(e) => setW(e.target.value)} disabled={isFixed && mode === 'manual'} className={isFixed && mode === 'manual' ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""} required />
-            </div>
-            <div className="space-y-2">
-              <Label>H (cm)</Label>
-              <Input type="number" value={h} onChange={(e) => setH(e.target.value)} disabled={isFixed && mode === 'manual'} className={isFixed && mode === 'manual' ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""} required />
-            </div>
-            <div className="space-y-2">
-              <Label>Wt (kg)</Label>
-              <Input type="number" value={weight} onChange={(e) => setWeight(e.target.value)} disabled={isFixed && mode === 'manual'} className={isFixed && mode === 'manual' ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""} required />
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {/* L, W, H, Weight Inputs */}
+            {[ {l: 'L', v: l, s: setL}, {l: 'W', v: w, s: setW}, {l: 'H', v: h, s: setH}, {l: 'Wt', v: weight, s: setWeight} ].map((field) => (
+              <div key={field.l} className="space-y-2">
+                <Label className="text-xs">{field.l} (cm/kg)</Label>
+                <Input 
+                  type="number" 
+                  value={field.v} 
+                  onChange={(e) => field.s(e.target.value)} 
+                  disabled={isFixed && mode === 'manual'} 
+                  className={`h-12 border-2 ${isFixed ? "bg-slate-50 border-slate-100 text-slate-400" : "border-slate-200"}`}
+                  required 
+                />
+              </div>
+            ))}
           </div>
 
-          <Button type="submit" className="w-full uppercase tracking-widest text-xs font-bold mt-4">
-            Add To Manifest
-          </Button>
+          <div className="space-y-4 pt-4 border-t-2 border-dashed border-slate-100">
+            <div className="grid grid-cols-4 gap-2">
+              <Button 
+                type="button"
+                variant="outline"
+                className="col-span-3 h-12 border-2 border-slate-200 font-bold uppercase text-[10px] tracking-wider"
+                onClick={() => alert("Current form data is ready for the manifest.")}
+              >
+                Review Entry
+              </Button>
+              <Button 
+                type="button"
+                onClick={handlePlusClick}
+                className="col-span-1 h-12 bg-blue-600 hover:bg-blue-700 text-white font-black text-2xl shadow-[2px_2px_0px_0px_rgba(30,58,138,1)]"
+              >
+                +
+              </Button>
+            </div>
+            
+            <Button 
+              type="submit" 
+              className="w-full h-14 bg-black text-white font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+            >
+              Add to Cart
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>
