@@ -21,9 +21,13 @@ from PIL import Image
 
 from pydantic import BaseModel
 import asyncio
-from mcp.client.stdio import stdio_client, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp import ClientSession, StdioServerParameters
 from mcp.client.session import ClientSession
-import math
+from math import radians, cos, sin, asin, sqrt
+import requests
+
+from src.mcp_trucking import fetch_all_trucking_quotes
 
 # ... rest of your code ...
 
@@ -39,6 +43,9 @@ class BookRequest(BaseModel):
 load_dotenv()
 
 app = FastAPI(title="TatvaConnect Smart Engine API")
+
+# 1. Define allowed origins
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,6 +58,7 @@ optimizer = LogisticsOptimizer()
 analyst   = LogisticsAnalyst(optimizer.vehicles)
 client    = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 sam_model = SAM("sam2.1_t.pt")
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +150,15 @@ def mask_tight_ui_box(mask_tensor, img_w: int, img_h: int) -> list:
         round((rmax / img_h) * 1000), round((cmax / img_w) * 1000),
     ]
 
+#radius of earth in kilometers. Use 3956 for miles
+def haversine(lat1, lon1, lat2, lon2):
+    # Radius of earth in kilometers. Use 3956 for miles
+    r = 6371 
+    phi1, phi2 = radians(lat1), radians(lat2)
+    dphi = radians(lat2 - lat1)
+    dlambda = radians(lon2 - lon1)
+    a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
+    return 2 * r * asin(sqrt(a))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 1 — ANALYZE
@@ -316,49 +333,28 @@ async def estimate_metrics(payload: dict):
 # ENDPOINT 3 — RECOMMEND
 # ─────────────────────────────────────────────────────────────────────────────
 #helpinfg function to calculate distance between two pincodes (mock implementation)
-def get_distance(p1: str, p2: str):
-    # This is a mock database of pincode coordinates
-    # In a real app, you'd use a CSV or Google Maps API
-    PIN_COORDS = {
-        "400001": (18.9218, 72.8335), # Mumbai
-        "530001": (17.7041, 83.2977), # Visakhapatnam
-        "560001": (12.9716, 77.5946), # Bangalore
-        "110001": (28.6139, 77.2090), # Delhi
-    }
-
-    # If pincode not in our mock list, return a random realistic distance
-    if p1 not in PIN_COORDS or p2 not in PIN_COORDS:
-        return 450.0 
-
-    lat1, lon1 = PIN_COORDS[p1]
-    lat2, lon2 = PIN_COORDS[p2]
-
-    # Haversine formula to calculate distance in km
-    radius = 6371 
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) * math.sin(dlat / 2) +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(dlon / 2) * math.sin(dlon / 2))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return round(radius * c, 2)
+def get_locationiq_distance(lat1, lon1, lat2, lon2):
+    token = os.getenv("LOCATION_IQ_TOKEN")
+    # LocationIQ uses lon,lat format (different from Google!)
+    url = f"https://us1.locationiq.com/v1/directions/driving/{lon1},{lat1};{lon2},{lat2}?key={token}&overview=false"
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if "routes" in data:
+            # Distance is in meters, convert to KM
+            return round(data["routes"][0]["distance"] / 1000, 2)
+    except Exception as e:
+        print(f"LocationIQ Error: {e}")
+    
+    return 15.0 # Final fallback if API fails
 
 @app.post("/vehicle/recommend")
-async def recommend_vehicle(data: dict):
-    # 1. Get route info from the request
-    route = data.get("route", {})
-    p1 = route.get("pickup_pincode", "400001")
-    p2 = route.get("delivery_pincode", "400001")
-    
-    # 2. Calculate actual distance
-    distance_km = get_distance(p1, p2)
-    
-    # 3. Rest of your recommendation logic...
-    return {
-        "vehicle": "3-Wheeler" if distance_km < 50 else "Tata Ace",
-        "distance_text": f"{distance_km} km",
-        "estimated_fare": f"₹{distance_km * 12 + 300}" # Example fare math
-    }
+async def recommend(data: dict):
+    # Ensure 'metrics' and 'route' are present in the 'data' dict
+    recommendation = optimizer.recommend_vehicle(data.get('metrics', {}), data)
+    return recommendation
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 4 — MCP SHIPROCKET QUOTE 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -368,7 +364,7 @@ async def get_quotes(request: QuoteRequest):
     # Setup parameters for the MCP server process
     server_params = StdioServerParameters(
         command="python",
-        args=["src/mcp_shiprocket.py"],
+        args=[os.path.join(BASE_DIR, "src", "mcp_trucking.py")],
         env=os.environ.copy()
     )
     
@@ -424,3 +420,38 @@ async def book_shipment_endpoint(request: BookRequest):
     except Exception as e:
         print(f"MCP Booking Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT 6 — MCP for all trucking quotes
+# ─────────────────────────────────────────────────────────────────────────────
+# backend/src/main.py
+
+@app.post("/carrier/all-trucking-quotes")
+async def get_all_trucking(request: dict):
+    # This points the 'brain' to your aggregator file
+    server_params = StdioServerParameters(
+        command="python",
+        args=["src/mcp_trucking.py"], # Make sure this path is correct!
+        env=os.environ.copy()
+    )
+    
+    try:
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                
+                # We call the unified tool we built
+                result = await session.call_tool(
+                    "fetch_all_trucking_quotes", 
+                    arguments={
+                        "p_lat": request.get("pickup_lat"),
+                        "p_lng": request.get("pickup_lng"),
+                        "d_lat": request.get("delivery_lat"),
+                        "d_lng": request.get("delivery_lng")
+                    }
+                )
+                return {"status": "success", "data": result.content}
+    except Exception as e:
+        print(f"MCP Aggregator Error: {e}")
+        return {"status": "error", "message": str(e)}

@@ -33,6 +33,8 @@ export interface DeliveryItem {
 export interface RouteInfo {
   pickupPincode: string;
   deliveryPincode: string;
+  pickupCoords?: { lat: number; lng: number };
+  deliveryCoords?: { lat: number; lng: number };
 }
 
 export interface OptimizationResult {

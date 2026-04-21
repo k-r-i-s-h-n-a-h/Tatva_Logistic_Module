@@ -14,7 +14,7 @@ interface ManualEntryProps {
 }
 
 export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps) {
-  // Initialize with empty strings to allow the "Select..." placeholder to show up
+  // 1. State Management
   const [service, setService] = useState<string>("");
   const [material, setMaterial] = useState<string>("");
   const [l, setL] = useState("");
@@ -24,7 +24,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
   const [qty, setQty] = useState("1");
   const [isFixed, setIsFixed] = useState(false);
 
-  // Auto-fill logic for VLM mode
+  // 2. AI/Standard Size Logic
   useEffect(() => {
     if (!isFixed && mode === 'auto') {
       if (prefilledDims.l) setL(prefilledDims.l);
@@ -33,7 +33,6 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
     }
   }, [prefilledDims, isFixed, mode]);
 
-  // Standard size logic for Manual mode
   useEffect(() => {
     if (mode === 'manual' && material && ITEM_STANDARDS[material]) {
       const std = ITEM_STANDARDS[material];
@@ -44,10 +43,10 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
     }
   }, [material, mode]);
 
-  // THE MASTER SAVE FUNCTION
+  // 3. The Master Save & Reset Logic
   const processAddition = () => {
-    if (!material || !weight) {
-      alert("Please fill in material and weight before adding.");
+    if (!material || !weight || !service) {
+      alert("Please select a category, material, and weight.");
       return false;
     }
 
@@ -66,7 +65,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
 
     onAddItem(newItem);
 
-    // TOTAL RESET: Clear everything for a fresh start
+    // TOTAL RESET: Clears the form completely for the next item
     setService("");
     setMaterial("");
     setL("");
@@ -77,16 +76,20 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
     return true;
   };
 
-  const handlePlusClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (processAddition()) {
-      console.log("Item saved. Form ready for next separate item.");
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  // 4. Button Handlers
+  const handleAddAndAnother = (e: React.MouseEvent) => {
     e.preventDefault();
     processAddition();
+  };
+
+  const handleFinalAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (processAddition()) {
+      // Small delay to ensure the item is added before scrolling
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    }
   };
 
   const selectClass = "flex h-12 w-full items-center justify-between rounded-md border-2 border-slate-200 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black";
@@ -104,7 +107,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleFinalAdd} className="space-y-6">
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -113,7 +116,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
                 value={service} 
                 onChange={(e) => {
                   setService(e.target.value);
-                  setMaterial(""); // Reset material when category changes
+                  setMaterial(""); 
                 }} 
                 className={selectClass}
               >
@@ -126,6 +129,7 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
 
             <div className="space-y-2">
               <Label className="uppercase text-[10px] font-bold tracking-widest text-slate-500">Product / Material</Label>
+              {/* Controlled Select component ensures the reset works */}
               <Select value={material} onValueChange={setMaterial}>
                 <SelectTrigger className="h-12 border-2 border-slate-200">
                   <SelectValue placeholder="Select Material..." />
@@ -155,16 +159,15 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {/* L, W, H, Weight Inputs */}
             {[ {l: 'L', v: l, s: setL}, {l: 'W', v: w, s: setW}, {l: 'H', v: h, s: setH}, {l: 'Wt', v: weight, s: setWeight} ].map((field) => (
               <div key={field.l} className="space-y-2">
-                <Label className="text-xs">{field.l} (cm/kg)</Label>
+                <Label className="text-xs font-bold">{field.l} (cm/kg)</Label>
                 <Input 
                   type="number" 
                   value={field.v} 
                   onChange={(e) => field.s(e.target.value)} 
                   disabled={isFixed && mode === 'manual'} 
-                  className={`h-12 border-2 ${isFixed ? "bg-slate-50 border-slate-100 text-slate-400" : "border-slate-200"}`}
+                  className={`h-12 border-2 ${isFixed ? "bg-slate-50 border-slate-100" : "border-slate-200 font-bold"}`}
                   required 
                 />
               </div>
@@ -172,21 +175,13 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
           </div>
 
           <div className="space-y-4 pt-4 border-t-2 border-dashed border-slate-100">
-            <div className="grid grid-cols-4 gap-2">
+            <div className="flex gap-2">
               <Button 
                 type="button"
-                variant="outline"
-                className="col-span-3 h-12 border-2 border-slate-200 font-bold uppercase text-[10px] tracking-wider"
-                onClick={() => alert("Current form data is ready for the manifest.")}
+                onClick={handleAddAndAnother}
+                className="flex-1 h-14 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-tighter shadow-[4px_4px_0px_0px_rgba(30,58,138,1)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px]"
               >
-                Review Entry
-              </Button>
-              <Button 
-                type="button"
-                onClick={handlePlusClick}
-                className="col-span-1 h-12 bg-blue-600 hover:bg-blue-700 text-white font-black text-2xl shadow-[2px_2px_0px_0px_rgba(30,58,138,1)]"
-              >
-                +
+                + Add & Another
               </Button>
             </div>
             
@@ -194,8 +189,12 @@ export function ManualEntry({ mode, onAddItem, prefilledDims }: ManualEntryProps
               type="submit" 
               className="w-full h-14 bg-black text-white font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
             >
-              Add to Cart
+              Confirm & Go to Maps
             </Button>
+            
+            <p className="text-[10px] text-center text-slate-400 font-medium italic">
+              * Add multiple items to optimize your fleet and save costs.
+            </p>
           </div>
         </form>
       </CardContent>

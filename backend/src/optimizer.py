@@ -1,10 +1,13 @@
 import googlemaps
 import math
 import os 
-
+import requests
 class LogisticsOptimizer:
     def __init__(self):
-        self.gmaps = googlemaps.Client(os.getenv('GOOGLE_MAPS_API_KEY'))
+        self.token = os.getenv("LOCATION_IQ_TOKEN") 
+        if not self.token:
+            print("Warning: LOCATION_IQ_TOKEN not found in .env")
+
         self.vehicles = [
             {
                 "name": "2-Wheeler (Bike)",
@@ -152,15 +155,23 @@ class LogisticsOptimizer:
             }
         ]
 
-    def get_distance(self, origin, destination):
-        """Uses Google Maps API to get actual road distance in KM."""
+    def get_distance(self, lat1, lon1, lat2, lon2):
+        # LocationIQ URL format: lon,lat;lon,lat
+        url = f"https://us1.locationiq.com/v1/directions/driving/{lon1},{lat1};{lon2},{lat2}"
+        params = {
+            "key": self.token,
+            "overview": "false"
+        }
+        
         try:
-            result = self.gmaps.distance_matrix(origin, destination, mode='driving')
-            # Extract distance in meters and convert to KM
-            distance_meters = result['rows'][0]['elements'][0]['distance']['value']
-            return distance_meters / 1000
-        except:
-            return 10 # Fallback to 10km if API fails
+            response = requests.get(url, params=params)
+            data = response.json()
+            # Distance is in meters, convert to km
+            return data["routes"][0]["distance"] / 1000
+        except Exception as e:
+            print(f"LocationIQ Error: {e}")
+            return 15.0 # Fallback
+        
 
     # Inside backend/src/optimizer.py
     def recommend_vehicle(self, metrics, payload):
@@ -171,7 +182,14 @@ class LogisticsOptimizer:
         # --- 1. ADDED THIS: Get addresses and calculate distance ---
         origin = payload.get('route', {}).get('pickup_address', '')
         dest = payload.get('route', {}).get('delivery_address', '')
-        distance_km = self.get_distance(origin, dest)
+        route = payload.get('route', {})
+        lat1 = route.get('pickup_lat')
+        lon1 = route.get('pickup_lng')
+        lat2 = route.get('delivery_lat')
+        lon2 = route.get('delivery_lng')
+
+        # Now call it with all 4 required arguments
+        distance_km = self.get_distance(lat1, lon1, lat2, lon2)
         # -----------------------------------------------------------
 
         # --- NEW: Check if we have "Long but Leanable" items ---
