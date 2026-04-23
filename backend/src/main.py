@@ -333,26 +333,72 @@ async def estimate_metrics(payload: dict):
 # ENDPOINT 3 — RECOMMEND
 # ─────────────────────────────────────────────────────────────────────────────
 #helpinfg function to calculate distance between two pincodes (mock implementation)
-def get_locationiq_distance(lat1, lon1, lat2, lon2):
-    token = os.getenv("LOCATION_IQ_TOKEN")
-    # LocationIQ uses lon,lat format (different from Google!)
-    url = f"https://us1.locationiq.com/v1/directions/driving/{lon1},{lat1};{lon2},{lat2}?key={token}&overview=false"
+def get_google_road_distance(origin_str: str, destination_str: str) -> float:
+    """
+    Accepts coordinates "lat,lng" OR pincodes "560001".
+    Returns driving road distance in KM.
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    
+    # Validation: Ensure we aren't sending empty strings
+    if not origin_str or not destination_str:
+        return 0.0
+
+    params = {
+        "origins": origin_str,
+        "destinations": destination_str,
+        "mode": "driving",
+        "units": "metric",
+        "key": api_key
+    }
     
     try:
-        response = requests.get(url)
+        response = requests.get(url, params=params, timeout=5)
         data = response.json()
-        if "routes" in data:
-            # Distance is in meters, convert to KM
-            return round(data["routes"][0]["distance"] / 1000, 2)
+        
+        if data.get("status") == "OK":
+            element = data["rows"][0]["elements"][0]
+            if element.get("status") == "OK":
+                return round(element["distance"]["value"] / 1000, 2)
+            else:
+                print(f"Google Element Error: {element.get('status')}")
     except Exception as e:
-        print(f"LocationIQ Error: {e}")
-    
-    return 15.0 # Final fallback if API fails
+        print(f"Google Maps Network Error: {e}")
+        
+    return 15.0 # Fallback
+
 
 @app.post("/vehicle/recommend")
 async def recommend(data: dict):
-    # Ensure 'metrics' and 'route' are present in the 'data' dict
+    route = data.get('route', {})
+    
+    # ─── STEP 1: RESOLVE ORIGIN & DESTINATION ───
+    # If Pincodes exist (Courier Mode), use them. 
+    # Otherwise, combine Lat/Lng (Trucking Mode).
+    
+    p_pincode = route.get('pickup_pincode')
+    d_pincode = route.get('delivery_pincode')
+
+    if p_pincode and d_pincode:
+        origin = f"{p_pincode}, india"
+        destination = f"{d_pincode}, india"
+    else:
+        origin = f"{route.get('pickup_lat')},{route.get('pickup_lng')}"
+        destination = f"{route.get('delivery_lat')},{route.get('delivery_lng')}"
+
+    # ─── STEP 2: GET ACCURATE GOOGLE DISTANCE ───
+    actual_distance = get_google_road_distance(origin, destination)
+
+    # ─── STEP 3: RUN OPTIMIZER ───
+    # We pass the real distance into the optimizer data
+    data['calculated_distance'] = actual_distance
     recommendation = optimizer.recommend_vehicle(data.get('metrics', {}), data)
+    
+    # Ensure the final response shows the real Google distance
+    recommendation["distance"] = actual_distance
+    recommendation["distance_text"] = f"{actual_distance} km"
+    
     return recommendation
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,14 +410,16 @@ async def get_quotes(request: QuoteRequest):
     # Setup parameters for the MCP server process
     server_params = StdioServerParameters(
         command="python",
-        args=[os.path.join(BASE_DIR, "src", "mcp_trucking.py")],
+        args=[os.path.join(BASE_DIR, "src", "mcp_shiprocket.py")],
         env=os.environ.copy()
     )
     
     try:
+        print(f"[QUOTE] Starting MCP server with: {server_params.command} {' '.join(server_params.args)}")
         async with stdio_client(server_params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
+                print(f"[QUOTE] MCP session initialized, calling fetch_carrier_quotes")
                 
                 result = await session.call_tool(
                     "fetch_carrier_quotes",
@@ -381,8 +429,30 @@ async def get_quotes(request: QuoteRequest):
                         "weight_kg": request.weight_kg
                     }
                 )
-                return {"status": "success", "data": result.content}
+                
+                print(f"[QUOTE] Tool result: {result}")
+                
+                # Extract the actual tool result from MCP content blocks
+                tool_result = None
+                if result.content:
+                    for content in result.content:
+                        if hasattr(content, 'text'):
+                            tool_result = content.text
+                            break
+                
+                # Return in the format the frontend expects
+                return {
+                    "status": "success",
+                    "data": [{"text": tool_result or json.dumps({"error": "No response from Shiprocket"})}]
+                }
     except Exception as e:
+        print(f"[QUOTE] Error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "data": [{"text": json.dumps({"error": str(e)})}]
+        }
         raise HTTPException(status_code=500, detail=str(e))
     
 
@@ -395,14 +465,16 @@ async def book_shipment_endpoint(request: BookRequest):
     # Setup parameters identical to the quote endpoint
     server_params = StdioServerParameters(
         command="python",
-        args=["src/mcp_shiprocket.py"],
+        args=[os.path.join(BASE_DIR, "src", "mcp_shiprocket.py")],
         env=os.environ.copy()
     )
     
     try:
+        print(f"[BOOK] Starting MCP server")
         async with stdio_client(server_params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
+                print(f"[BOOK] MCP session initialized, calling book_shipment")
                 
                 # ── Call the 'book_shipment' tool ──
                 # This passes the carrier_id and the dict of order details 
@@ -415,43 +487,46 @@ async def book_shipment_endpoint(request: BookRequest):
                     }
                 )
                 
-                return {"status": "success", "data": result.content}
+                print(f"[BOOK] Tool result: {result}")
+                
+                # Extract the actual tool result from MCP content blocks
+                tool_result = None
+                if result.content:
+                    for content in result.content:
+                        if hasattr(content, 'text'):
+                            tool_result = content.text
+                            break
+                
+                # Return in the format the frontend expects
+                return {
+                    "status": "success",
+                    "data": [{"text": tool_result or json.dumps({"error": "No response from Shiprocket"})}]
+                }
                 
     except Exception as e:
-        print(f"MCP Booking Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[BOOK] Error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "data": [{"text": json.dumps({"error": str(e)})}]
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT 6 — MCP for all trucking quotes
+# ENDPOINT 6 — TRUCKING QUOTES (direct call, no MCP stdio wrapper needed)
 # ─────────────────────────────────────────────────────────────────────────────
-# backend/src/main.py
 
 @app.post("/carrier/all-trucking-quotes")
 async def get_all_trucking(request: dict):
-    # This points the 'brain' to your aggregator file
-    server_params = StdioServerParameters(
-        command="python",
-        args=["src/mcp_trucking.py"], # Make sure this path is correct!
-        env=os.environ.copy()
-    )
-    
     try:
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                
-                # We call the unified tool we built
-                result = await session.call_tool(
-                    "fetch_all_trucking_quotes", 
-                    arguments={
-                        "p_lat": request.get("pickup_lat"),
-                        "p_lng": request.get("pickup_lng"),
-                        "d_lat": request.get("delivery_lat"),
-                        "d_lng": request.get("delivery_lng")
-                    }
-                )
-                return {"status": "success", "data": result.content}
+        quotes = await fetch_all_trucking_quotes(
+            p_lat=request.get("pickup_lat"),
+            p_lng=request.get("pickup_lng"),
+            d_lat=request.get("delivery_lat"),
+            d_lng=request.get("delivery_lng"),
+        )
+        return {"status": "success", "data": quotes}
     except Exception as e:
-        print(f"MCP Aggregator Error: {e}")
+        print(f"Trucking Aggregator Error: {e}")
         return {"status": "error", "message": str(e)}

@@ -1,12 +1,26 @@
 # backend/src/mcp_shiprocket.py
 import os
+import sys
+import json
 import requests
+import logging
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+# Setup logging to help debug MCP server
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='[MCP-Shiprocket] %(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 # ⬇️ ADD THIS: Point the MCP subprocess to the .env file ⬇️
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+logger.info(f"BASE_DIR: {BASE_DIR}")
+logger.info(f"SHIPROCKET_EMAIL loaded: {bool(os.getenv('SHIPROCKET_EMAIL'))}")
 
 mcp = FastMCP("Tatva-Shiprocket-Adapter")
 SHIPROCKET_API = "https://apiv2.shiprocket.in/v1/external"
@@ -21,27 +35,34 @@ def get_token():
     return response.json().get("token")
 
 @mcp.tool()
-def fetch_carrier_quotes(pickup_pincode: str, delivery_pincode: str, weight_kg: float) -> dict:
+async def fetch_carrier_quotes(pickup_pincode: str, delivery_pincode: str, weight_kg: float) -> dict:
     """Fetches shipping rates from Shiprocket."""
-    token = get_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    SERVICE_URL = f"{SHIPROCKET_API}/courier/serviceability/"
-
-    params = {
-        "pickup_postcode": pickup_pincode,
-        "delivery_postcode": delivery_pincode,
-        "weight": weight_kg,
-        "cod": 0,
-        "is_return": 0,
-        "declared_value": 500
-    }
-    
-    # Use params instead of json for a GET request here
+    logger.info(f"Tool called: fetch_carrier_quotes({pickup_pincode}, {delivery_pincode}, {weight_kg})")
     try:
+        token = get_token()
+        if not token:
+            logger.error("Failed to get Shiprocket token")
+            return {"error": "Authentication failed", "status": 401}
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        SERVICE_URL = f"{SHIPROCKET_API}/courier/serviceability/"
+
+        params = {
+            "pickup_postcode": pickup_pincode,
+            "delivery_postcode": delivery_pincode,
+            "weight": weight_kg,
+            "cod": 0,
+            "is_return": 0,
+            "declared_value": 500
+        }
+        
+        logger.info(f"Calling Shiprocket API with params: {params}")
         response = requests.get(SERVICE_URL, headers=headers, params=params)
+        logger.info(f"Shiprocket response status: {response.status_code}")
         return response.json()
     except Exception as e:
-        return {"error": "Connection Error", "message": str(e)}
+        logger.error(f"Error in fetch_carrier_quotes: {str(e)}", exc_info=True)
+        return {"error": "Connection Error", "message": str(e), "status": 500}
 
 @mcp.tool()
 def book_shipment(carrier_id: int, order_details: dict) -> dict:

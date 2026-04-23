@@ -156,21 +156,39 @@ class LogisticsOptimizer:
         ]
 
     def get_distance(self, lat1, lon1, lat2, lon2):
-        # LocationIQ URL format: lon,lat;lon,lat
-        url = f"https://us1.locationiq.com/v1/directions/driving/{lon1},{lat1};{lon2},{lat2}"
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            print("Warning: GOOGLE_MAPS_API_KEY not set, using fallback distance.")
+            return 15.0
+
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {
-            "key": self.token,
-            "overview": "false"
+            "origins": f"{lat1},{lon1}",
+            "destinations": f"{lat2},{lon2}",
+            "mode": "driving",         # ← actual road routing, not crow-fly
+            "units": "metric",
+            "key": api_key
         }
-        
+
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=5)
             data = response.json()
-            # Distance is in meters, convert to km
-            return data["routes"][0]["distance"] / 1000
+
+            if data.get("status") != "OK":
+                print(f"Distance Matrix API error: {data.get('status')}")
+                return 15.0
+
+            element = data["rows"][0]["elements"][0]
+            if element.get("status") != "OK":
+                print(f"Route element error: {element.get('status')}")
+                return 15.0
+
+            # distance.value is in meters → convert to km
+            return round(element["distance"]["value"] / 1000, 2)
+
         except Exception as e:
-            print(f"LocationIQ Error: {e}")
-            return 15.0 # Fallback
+            print(f"Google Maps Distance Error: {e}")
+            return 15.0
         
 
     # Inside backend/src/optimizer.py

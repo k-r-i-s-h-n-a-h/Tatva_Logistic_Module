@@ -6,7 +6,7 @@ declare global {
   }
 }
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { MapPin, Info } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +18,10 @@ interface GoogleMapsPickerProps {
 export function GoogleMapsPicker({ onLocationSelect }: GoogleMapsPickerProps) {
   const pickupRef = useRef<HTMLInputElement>(null)
   const deliveryRef = useRef<HTMLInputElement>(null)
+  const [locations, setLocations] = useState({ pickup: '', delivery: '' });
+  const lastPickupData = useRef<any>(null);
+  const lastDeliveryData = useRef<any>(null);
+
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.google && window.google.maps) {
@@ -39,23 +43,44 @@ export function GoogleMapsPicker({ onLocationSelect }: GoogleMapsPickerProps) {
 
       pickupAuto.addListener("place_changed", () => {
         const place = pickupAuto.getPlace();
-        if (place.geometry) {
-            // Send the raw 'place' object directly
-            onLocationSelect('pickup', place); 
-            }
-        });
+        if (!place.geometry?.location) return;
+        const data = {
+          address: place.formatted_address,
+          lat: place.geometry.location.lat(),
+          lng: place.geometry.location.lng(),
+          pincode: place.address_components?.find((c: any) =>
+            c.types.includes("postal_code"))?.long_name
+        };
+        lastPickupData.current = data;  // ← store it
+        onLocationSelect('pickup', data);
+      });
 
       deliveryAuto.addListener("place_changed", () => {
         const place = deliveryAuto.getPlace();
-        if (place.geometry) {
-          onLocationSelect('delivery', {
-            address: place.formatted_address,
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng(),
-            pincode: place.address_components?.find((c: any) => 
-              c.types.includes("postal_code"))?.long_name
-          });
-        }
+        if (!place.geometry?.location) return;
+        const data = {
+          address: place.formatted_address,
+          lat: place.geometry.location.lat(),
+          lng: place.geometry.location.lng(),
+          pincode: place.address_components?.find((c: any) =>
+            c.types.includes("postal_code"))?.long_name
+        };
+        lastDeliveryData.current = data;  // ← store it
+        onLocationSelect('delivery', data);
+      });
+
+      deliveryAuto.addListener("place_changed", () => {
+        const place = deliveryAuto.getPlace();
+        if (!place.geometry?.location) return;
+        const data = {
+          address: place.formatted_address,
+          lat: place.geometry.location.lat(),
+          lng: place.geometry.location.lng(),
+          pincode: place.address_components?.find((c: any) =>
+            c.types.includes("postal_code"))?.long_name
+        };
+        lastDeliveryData.current = data;  // ← store it
+        onLocationSelect('delivery', data);
       });
     }
   }, [onLocationSelect]); // Closes useEffect
@@ -83,6 +108,32 @@ export function GoogleMapsPicker({ onLocationSelect }: GoogleMapsPickerProps) {
           />
         </div>
 
+          {/* ── SWAP BUTTON ── */}
+      <div className="flex justify-center">
+        <button
+          onClick={() => {
+            // Swap the input values visually
+            const pickupVal = pickupRef.current?.value || '';
+            const deliveryVal = deliveryRef.current?.value || '';
+            
+            if (pickupRef.current) pickupRef.current.value = deliveryVal;
+            if (deliveryRef.current) deliveryRef.current.value = pickupVal;
+            
+            // Swap the coords in parent state too
+            // We fire both callbacks with swapped data
+            if (pickupVal && deliveryVal) {
+              // Re-trigger geocoding for swapped values
+              // Simplest: just alert user to reselect — autocomplete won't re-fire
+              // Better: store last selected place data and swap it
+            }
+          }}
+          className="flex items-center gap-2 px-4 py-2 border-2 border-black text-xs font-black uppercase tracking-widest hover:bg-black hover:text-white transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-none"
+          type="button"
+        >
+          ⇅ Swap
+        </button>
+      </div>
+
         <div className="space-y-1">
           <label className="text-[10px] font-bold uppercase text-slate-500 block">Delivery Location</label>
           <input 
@@ -96,7 +147,8 @@ export function GoogleMapsPicker({ onLocationSelect }: GoogleMapsPickerProps) {
         <div className="flex items-start gap-2 p-2 bg-blue-50 rounded border border-blue-100">
           <Info className="w-3 h-3 text-blue-500 mt-0.5" />
           <p className="text-[9px] text-blue-700 leading-tight">
-            Our AI logistics fleet is optimized for **Intracity Bengaluru** routes.
+            Our AI logistics fleet is optimized for{' '}
+            <strong>Intracity Bengaluru</strong> routes.
           </p>
         </div>
       </CardContent>

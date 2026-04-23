@@ -41,20 +41,22 @@ export default function Home() {
     setCarrierQuotes([]);
   };
 
-  const handleLocationSelect = (type: 'pickup' | 'delivery', placeData: any) => {
-  // Safety check: make sure Google actually gave us a location
-  if (!placeData?.geometry?.location) return;
-
-  // Unpack the data here
-  const lat = placeData.geometry.location.lat();
-  const lng = placeData.geometry.location.lng();
-  
-  // Update the state
-  setRouteInfo(prev => ({
-    ...prev,
-    [type === 'pickup' ? 'pickupCoords' : 'deliveryCoords']: { lat, lng }
-  }));
+  const handleLocationSelect = (type: 'pickup' | 'delivery', data: any) => {
+  if (type === 'pickup') {
+    setRouteInfo(prev => ({
+      ...prev,
+      pickupPincode: data.pincode, // Capture the pincode from Google
+      pickupCoords: { lat: data.lat, lng: data.lng }
+    }));
+  } else {
+    setRouteInfo(prev => ({
+      ...prev,
+      deliveryPincode: data.pincode, // Capture the pincode from Google
+      deliveryCoords: { lat: data.lat, lng: data.lng }
+    }));
+  }
 };
+
 const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {lat: number, lng: number}) => {
   const token = process.env.NEXT_PUBLIC_LOCATION_IQ_TOKEN;
   console.log("DEBUG: Using LocationIQ Token:", token);
@@ -100,7 +102,21 @@ const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {la
       });
 
       const mcpWrapper = await res.json();
-      const shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
+      
+      // Check if response has data and proper structure
+      if (!mcpWrapper.data || !mcpWrapper.data[0] || !mcpWrapper.data[0].text) {
+        setQuoteError("Invalid response structure from backend");
+        return;
+      }
+
+      let shiprocketResponse;
+      try {
+        shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
+      } catch (parseError) {
+        console.error("Failed to parse Shiprocket response:", mcpWrapper.data[0].text);
+        setQuoteError("Backend error: " + mcpWrapper.data[0].text);
+        return;
+      }
 
       if (shiprocketResponse.status === 200 && shiprocketResponse.data?.available_courier_companies) {
         const companies = shiprocketResponse.data.available_courier_companies;
@@ -116,6 +132,7 @@ const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {la
         setQuoteError(shiprocketResponse.message || "No couriers available.");
       }
     } catch (error) {
+      console.error("Quote fetch error:", error);
       setQuoteError("Carrier data sync failed.");
     } finally {
       setIsFetchingQuotes(false);
@@ -125,14 +142,19 @@ const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {la
 const handleOptimize = async () => {
     if (items.length === 0) return alert("Please add items to manifest.");
     
-    if (!routeInfo.pickupCoords || !routeInfo.deliveryCoords) {
-      return alert("Please select both pickup and delivery locations.");
+    // Safety Check for Locations
+    if (serviceType === 'trucking' && (!routeInfo.pickupCoords || !routeInfo.deliveryCoords)) {
+      return alert("Please select both pickup and delivery locations on the map.");
+    }
+    if (serviceType === 'courier' && (!routeInfo.pickupPincode || !routeInfo.deliveryPincode)) {
+      return alert("Please enter both Pickup and Delivery Pincodes.");
     }
 
     setIsLoading(true);
+    setQuoteError(null);
     
     try {
-      // 1. Cargo Estimation (Physics)
+      // --- STEP 1: Cargo Estimation (Physics) ---
       const estRes = await fetch("http://localhost:8001/cargo/estimate", {
         method: "POST", 
         headers: { "Content-Type": "application/json" },
@@ -141,27 +163,11 @@ const handleOptimize = async () => {
       if (!estRes.ok) throw new Error("Cargo estimation failed");
       const estData = await estRes.json();
 
-      // 2. Fleet Recommendation (Logistics + Geography)
-      const recRes = await fetch("http://localhost:8001/vehicle/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          metrics: estData.metrics, 
-          items, 
-          route: {
-            pickup_lat: routeInfo.pickupCoords.lat,
-            pickup_lng: routeInfo.pickupCoords.lng,
-            delivery_lat: routeInfo.deliveryCoords.lat,
-            delivery_lng: routeInfo.deliveryCoords.lng,
-          }
-        }),
-      });
-      const recData = await recRes.json();
-
-      // ─── STEP 2.5: FETCH ALL PORTER LIVE RATES (The New Part) ───
-      // We only do this if serviceType is 'trucking'
-      if (serviceType === 'trucking') {
-        const porterRes = await fetch("http://localhost:8001/carrier/all-trucking-quotes", {
+      // --- STEP 2: Unified Carrier Quote Fetching ---
+      
+      // OPTION A: TRUCKING (Borzo/Porter Aggregator)
+      if (serviceType === 'trucking' && routeInfo.pickupCoords && routeInfo.deliveryCoords) {
+        const truckRes = await fetch("http://localhost:8001/carrier/all-trucking-quotes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -169,44 +175,96 @@ const handleOptimize = async () => {
             pickup_lng: routeInfo.pickupCoords.lng,
             delivery_lat: routeInfo.deliveryCoords.lat,
             delivery_lng: routeInfo.deliveryCoords.lng,
+            weight_kg: estData.metrics.chargeable_weight_kg,
+            matter: items[0]?.material_type || "Construction material"
           }),
         });
         
-        if (porterRes.ok) {
-          const porterData = await porterRes.json();
-          // Assuming you have a state: const [allQuotes, setAllQuotes] = useState([]);
+        if (truckRes.ok) {
+          const porterData = await truckRes.json();
           setAllQuotes(porterData.data || []); 
         }
       }
 
-      // 3. UI Scaling and State Update
-      const volumeInM3 = estData.metrics.total_volume_cm3 / 1000000;
-      const distanceNum = (recData.distance_text && parseFloat(recData.distance_text)) || recData.distance || 0;
+      // OPTION B: COURIER (Shiprocket)
+      if (serviceType === 'courier') {
+        const courierRes = await fetch("http://127.0.0.1:8001/carrier/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickup_pincode: routeInfo.pickupPincode,
+            delivery_pincode: routeInfo.deliveryPincode,
+            weight_kg: estData.metrics.chargeable_weight_kg
+          }),
+        });
 
-      const newResult = {
+        const mcpWrapper = await courierRes.json();
+        
+        // Check if response has data and proper structure
+        if (!mcpWrapper.data || !mcpWrapper.data[0] || !mcpWrapper.data[0].text) {
+          setQuoteError("Invalid response structure from backend");
+          throw new Error("Invalid MCP response structure");
+        }
+
+        let shiprocketResponse;
+        try {
+          shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
+        } catch (parseError) {
+          console.error("Failed to parse Shiprocket response:", mcpWrapper.data[0].text);
+          setQuoteError("Backend error: " + mcpWrapper.data[0].text);
+          throw new Error("Failed to parse Shiprocket response");
+        }
+
+        if (shiprocketResponse.status === 200) {
+           const companies = shiprocketResponse.data.available_courier_companies;
+           setCarrierQuotes(companies.map((c: any) => ({
+             courier_name: c.courier_name,
+             rate: c.rate,
+             etd: c.etd || `${c.estimated_delivery_days} Days`,
+             courier_company_id: c.courier_company_id,
+             rating: parseFloat(c.rating) || 0
+           })));
+        }
+      }
+
+      // --- STEP 3: Fleet Recommendation & UI Update ---
+      const recRes = await fetch("http://localhost:8001/vehicle/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          metrics: estData.metrics, 
+          items, 
+          route: serviceType === 'trucking' && routeInfo.pickupCoords && routeInfo.deliveryCoords ? {
+            pickup_lat: routeInfo.pickupCoords?.lat,
+            pickup_lng: routeInfo.pickupCoords?.lng,
+            delivery_lat: routeInfo.deliveryCoords?.lat,
+            delivery_lng: routeInfo.deliveryCoords?.lng,
+          } : {
+            pickup_pincode: routeInfo.pickupPincode,
+            delivery_pincode: routeInfo.deliveryPincode
+          }
+        }),
+      });
+      const recData = await recRes.json();
+
+      const volumeInM3 = estData.metrics.total_volume_cm3 / 1000000;
+      setResult({
         chargeableWeight: estData.metrics.chargeable_weight_kg || 0,
         cargoVolume: volumeInM3,
         fleetMatch: {
           vehicle: recData.vehicle || "Standard Truck",
           fare: recData.estimated_fare ? parseInt(String(recData.estimated_fare).replace(/[^0-9]/g, '')) : 0,
-          distance: distanceNum
+          distance: recData.distance || 0
         }
-      };
-
-      setResult(newResult);
-
-      // Handle Courier Mode (Shiprocket)
-      if (serviceType === 'courier') {
-        await handleFetchQuotes(newResult); 
-      }
+      });
 
     } catch (error) {
       console.error("Optimization Error:", error);
-      alert("Backend Connection Error. Check FastAPI logs.");
+      setQuoteError("Failed to sync carrier data. Please check connection.");
     } finally {
       setIsLoading(false);
     }
-  };
+  };;
 
   const handleRemoveItem = (id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id));
@@ -285,7 +343,7 @@ const handleOptimize = async () => {
                     <ActiveManifest items={items} onRemoveItem={handleRemoveItem} />
                   </div>
                 )}
-                <LocationIQPicker onLocationSelect={handleLocationSelect} />
+                <GoogleMapsPicker onLocationSelect={handleLocationSelect} />
               </div>
             )}
 
@@ -303,6 +361,7 @@ const handleOptimize = async () => {
              <ResultsDashboard 
                 result={result} 
                 quotes={carrierQuotes} 
+                truckingQuotes={allQuotes}
                 mode={serviceType} 
                 onSelectCourier={handleBookCourier} 
               />

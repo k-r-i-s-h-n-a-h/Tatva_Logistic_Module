@@ -1,79 +1,150 @@
-# backend/src/mcp_trucking.py
 import os
 import asyncio
 import requests
 from mcp.server.fastmcp import FastMCP
-#from .porter_client import PorterClient # Existing
-#from .borzo_client import BorzoClient   # To be created
 
 mcp = FastMCP("Tatva-Intracity-Aggregator")
 
+BORZO_VEHICLES = [
+    {"type_id": 8,  "name": "3-Wheeler",         "capacity_kg": 300},
+    {"type_id": 9,  "name": "Tata Ace (7ft)",     "capacity_kg": 750},
+    {"type_id": 10, "name": "Pickup / Dost (8ft)", "capacity_kg": 1500},
+]
+
 @mcp.tool()
-async def fetch_all_trucking_quotes(p_lat: float, p_lng: float, d_lat: float, d_lng: float) -> list:
-    coords = {"p": {"lat": p_lat, "lng": p_lng}, "d": {"lat": d_lat, "lng": d_lng}}
-    
-    # ✅ FIX: return_exceptions=True prevents the "TaskGroup" crash
+async def fetch_all_trucking_quotes(
+    p_lat: float, p_lng: float,
+    d_lat: float, d_lng: float,
+    weight_kg: float = 0.0,
+    matter: str = "Construction material"
+) -> list:
+    coords = {
+        "p": {"lat": p_lat, "lng": p_lng},
+        "d": {"lat": d_lat, "lng": d_lng},
+        "weight_kg": weight_kg,
+        "matter": matter
+    }
+    print(f"[AGGREGATOR] weight_kg received: {weight_kg}")
+
     results = await asyncio.gather(
         call_borzo(coords),
-        # call_porter(coords), 
-        return_exceptions=True 
+        call_blowhorn(coords),
+        return_exceptions=True
     )
-    
+
     all_quotes = []
     for res in results:
-        # If one carrier crashed, we log it but don't break the demo
         if isinstance(res, Exception):
-            print(f"Carrier Task Failed: {res}")
+            print(f"Carrier task failed: {res}")
             continue
-            
         if isinstance(res, list):
             all_quotes.extend(res)
-            
-    # ✅ EMERGENCY DEMO FALLBACK
-    # If all APIs fail, we return one "Mock" result so the UI isn't empty
+
     if not all_quotes:
         all_quotes.append({
             "carrier": "System Estimate",
-            "vehicle": "3-Wheeler",
+            "vehicle": "Tata Ace (7ft)",
             "estimated_fare": "₹550",
-            "eta": "10 mins"
+            "eta": "~30 mins"
         })
-            
+
     return all_quotes
 
-async def call_porter(coords):
-    # Map your PorterClient logic here
-    # Return format: {"carrier": "Porter", "vehicle": "Tata Ace", "fare": 850}
-    pass
 
-async def call_borzo(coords):
-    try:
-        token = os.getenv("BORZO_API_TOKEN")
-        url = f"{os.getenv('BORZO_API_URL')}/calculate-order"
-        
-        # ... your payload logic ...
+async def call_borzo(coords: dict) -> list:
+    token = os.getenv("BORZO_API_TOKEN")
+    base_url = os.getenv("BORZO_API_URL")
 
-        # Use a short timeout (3 seconds) so the demo doesn't hang
-        response = requests.post(url, json=payload, headers=headers, timeout=3)
-        data = response.json()
-        
-        if data.get("is_successful"):
-            return [{
-                "carrier": "Borzo",
-                "vehicle": "3-Wheeler" if int(item.get('vehicle_type_id', 0)) == 8 else "Tata Ace",
-                "estimated_fare": f"₹{item.get('delivery_fee_amount')}",
-                "eta": "Live quote"
-            } for item in data.get('delivery_fees', [])]
-            
-    except Exception as e:
-        print(f"BORZO ERROR: {e}")
-        
-    return [] # Always return an empty list on error
+    if not token or not base_url:
+        print("[BORZO] Token or URL missing.")
+        return []
 
-async def call_blowhorn(coords):
-    # Short Check: No API Key = No Results
+    weight_kg = coords.get("weight_kg", 0)
+    print(f"[BORZO] weight_kg: {weight_kg}")
+
+    # Only show vehicles that can handle the cargo weight
+    eligible_vehicles = [
+        v for v in BORZO_VEHICLES
+        if v["capacity_kg"] >= weight_kg
+    ]
+
+    if not eligible_vehicles:
+        eligible_vehicles = [BORZO_VEHICLES[-1]]
+
+    print(f"[BORZO] Eligible: {[v['name'] for v in eligible_vehicles]}")
+
+    headers = {
+        "X-DV-Auth-Token": token,
+        "Content-Type": "application/json"
+    }
+
+    quotes = []
+    for vehicle in eligible_vehicles:
+        payload = {
+            "matter": coords.get("matter", "Construction material"),
+            "vehicle_type_id": vehicle["type_id"],
+            "total_weight_kg": weight_kg,
+            "points": [
+                {
+                    "address": f"{coords['p']['lat']}, {coords['p']['lng']}",
+                    "latitude": str(coords["p"]["lat"]),
+                    "longitude": str(coords["p"]["lng"]),
+                    "contact_person": {"phone": "9999999999"}
+                },
+                {
+                    "address": f"{coords['d']['lat']}, {coords['d']['lng']}",
+                    "latitude": str(coords["d"]["lat"]),
+                    "longitude": str(coords["d"]["lng"]),
+                    "contact_person": {"phone": "9999999999"}
+                }
+            ]
+        }
+
+        def _sync_call(p=payload):
+            return requests.post(
+                f"{base_url}/calculate-order",
+                json=p, headers=headers, timeout=6
+            )
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, _sync_call)
+            data = response.json()
+
+            if data.get("is_successful"):
+                order = data.get("order", {})
+
+                # ── Test API maps all requests to type_id 8 (3-Wheeler) ──
+                # Use OUR vehicle name based on what we requested, not what
+                # Borzo echoes back — test API always echoes type_id 8
+                returned_type = order.get("vehicle_type_id")
+                if returned_type != vehicle["type_id"]:
+                    print(f"[BORZO] Test API remapped {vehicle['type_id']} → {returned_type}, using our name")
+
+                fare = order.get("delivery_fee_amount") or order.get("payment_amount") or "N/A"
+
+                quotes.append({
+                    "carrier": "Borzo",
+                    "vehicle": vehicle["name"],   # ← always use our requested name
+                    "estimated_fare": f"₹{float(fare):.0f}" if fare != "N/A" else "₹N/A",
+                    "eta": "Live quote",
+                    "vehicle_type_id": vehicle["type_id"]
+                })
+                print(f"[BORZO] {vehicle['name']}: ₹{fare}")
+            else:
+                print(f"[BORZO] {vehicle['name']} failed: {data.get('warnings')}")
+
+        except Exception as e:
+            print(f"[BORZO] {vehicle['name']} error: {e}")
+
+    return quotes
+
+
+async def call_blowhorn(coords: dict) -> list:
     if not os.getenv("BLOWHORN_API_KEY"):
         return []
-    
-    # Placeholder for when you get the "Mach" API docs
     return []
+
+
+if __name__ == "__main__":
+    mcp.run()
