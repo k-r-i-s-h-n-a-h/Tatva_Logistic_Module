@@ -10,7 +10,7 @@ import AutoCapture from "@/components/AutoCapture"
 import { DeliveryItem, RouteInfo, OptimizationResult } from "@/lib/logistics"
 import { Button } from "@/components/ui/button"
 import { GoogleMapsPicker } from "@/components/GoogleMapsPicker"
-import { LocationIQPicker } from "@/components/LocationIQPicker"
+import { BookingModal } from "@/components/BookingModal" // ← IMPORTED MODAL
 
 export default function Home() {
   const [serviceType, setServiceType] = useState<'courier' | 'trucking' | null>(null);
@@ -27,11 +27,14 @@ export default function Home() {
   const [isFetchingQuotes, setIsFetchingQuotes] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [autoDims, setAutoDims] = useState({ l: "", w: "", h: "" });
-  const [truckLocations, setTruckLocations] = useState({ 
-    pickup: null as any, 
-    delivery: null as any 
-  });
   const [allQuotes, setAllQuotes] = useState<any[]>([]);
+
+  // ─── NEW BOOKING STATES ──────────────────────────────────────────
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [selectedBookingCourier, setSelectedBookingCourier] = useState<any>(null);
+  const [isBookingSubmit, setIsBookingSubmit] = useState(false);
+  const [bookingSuccessData, setBookingSuccessData] = useState<any>(null);
+
   // ─── HANDLERS ──────────────────────────────────────────────────────────
 
   const handleAddItem = (newItem: DeliveryItem) => {
@@ -42,38 +45,20 @@ export default function Home() {
   };
 
   const handleLocationSelect = (type: 'pickup' | 'delivery', data: any) => {
-  if (type === 'pickup') {
-    setRouteInfo(prev => ({
-      ...prev,
-      pickupPincode: data.pincode, // Capture the pincode from Google
-      pickupCoords: { lat: data.lat, lng: data.lng }
-    }));
-  } else {
-    setRouteInfo(prev => ({
-      ...prev,
-      deliveryPincode: data.pincode, // Capture the pincode from Google
-      deliveryCoords: { lat: data.lat, lng: data.lng }
-    }));
-  }
-};
-
-const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {lat: number, lng: number}) => {
-  const token = process.env.NEXT_PUBLIC_LOCATION_IQ_TOKEN;
-  console.log("DEBUG: Using LocationIQ Token:", token);
-  // This uses the 'Directions' endpoint
-  const url = `https://us1.locationiq.com/v1/directions/driving/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?key=${token}&overview=false`;
-  
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
-    // distance is returned in meters, convert to km
-    const distanceKm = data.routes[0].distance / 1000;
-    return distanceKm;
-  } catch (error) {
-    console.error("LocationIQ Error:", error);
-    return 15; // Your default fallback
-  }
-};
+    if (type === 'pickup') {
+      setRouteInfo(prev => ({
+        ...prev,
+        pickupPincode: data.pincode,
+        pickupCoords: { lat: data.lat, lng: data.lng }
+      }));
+    } else {
+      setRouteInfo(prev => ({
+        ...prev,
+        deliveryPincode: data.pincode,
+        deliveryCoords: { lat: data.lat, lng: data.lng }
+      }));
+    }
+  };
 
   const handleDimensionsFound = (dims: { l?: string; w?: string; h?: string; weight?: string }) => {
     setAutoDims(prev => ({
@@ -83,66 +68,9 @@ const getDistanceWithLocationIQ = async (p1: {lat: number, lng: number}, p2: {la
     }));
   };
 
-  const handleFetchQuotes = async (currentResult: OptimizationResult | null) => {
-    const targetResult = currentResult || result;
-    if (!targetResult) return;
-    
-    setIsFetchingQuotes(true);
-    setQuoteError(null);
-
-    try {
-      const res = await fetch("http://127.0.0.1:8001/carrier/quote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pickup_pincode: routeInfo.pickupPincode,
-          delivery_pincode: routeInfo.deliveryPincode,
-          weight_kg: targetResult.chargeableWeight
-        }),
-      });
-
-      const mcpWrapper = await res.json();
-      
-      // Check if response has data and proper structure
-      if (!mcpWrapper.data || !mcpWrapper.data[0] || !mcpWrapper.data[0].text) {
-        setQuoteError("Invalid response structure from backend");
-        return;
-      }
-
-      let shiprocketResponse;
-      try {
-        shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
-      } catch (parseError) {
-        console.error("Failed to parse Shiprocket response:", mcpWrapper.data[0].text);
-        setQuoteError("Backend error: " + mcpWrapper.data[0].text);
-        return;
-      }
-
-      if (shiprocketResponse.status === 200 && shiprocketResponse.data?.available_courier_companies) {
-        const companies = shiprocketResponse.data.available_courier_companies;
-        const formattedQuotes = companies.map((c: any) => ({
-          courier_name: c.courier_name,
-          rate: c.rate,
-          etd: c.etd || `${c.estimated_delivery_days} Days`,
-          courier_company_id: c.courier_company_id,
-          rating: parseFloat(c.rating) || 0
-        }));
-        setCarrierQuotes(formattedQuotes);
-      } else {
-        setQuoteError(shiprocketResponse.message || "No couriers available.");
-      }
-    } catch (error) {
-      console.error("Quote fetch error:", error);
-      setQuoteError("Carrier data sync failed.");
-    } finally {
-      setIsFetchingQuotes(false);
-    }
-  };
-
-const handleOptimize = async () => {
+  const handleOptimize = async () => {
     if (items.length === 0) return alert("Please add items to manifest.");
     
-    // Safety Check for Locations
     if (serviceType === 'trucking' && (!routeInfo.pickupCoords || !routeInfo.deliveryCoords)) {
       return alert("Please select both pickup and delivery locations on the map.");
     }
@@ -152,6 +80,7 @@ const handleOptimize = async () => {
 
     setIsLoading(true);
     setQuoteError(null);
+    setBookingSuccessData(null); // Clear previous booking success
     
     try {
       // --- STEP 1: Cargo Estimation (Physics) ---
@@ -164,8 +93,6 @@ const handleOptimize = async () => {
       const estData = await estRes.json();
 
       // --- STEP 2: Unified Carrier Quote Fetching ---
-      
-      // OPTION A: TRUCKING (Borzo/Porter Aggregator)
       if (serviceType === 'trucking' && routeInfo.pickupCoords && routeInfo.deliveryCoords) {
         const truckRes = await fetch("http://localhost:8001/carrier/all-trucking-quotes", {
           method: "POST",
@@ -186,7 +113,6 @@ const handleOptimize = async () => {
         }
       }
 
-      // OPTION B: COURIER (Shiprocket)
       if (serviceType === 'courier') {
         const courierRes = await fetch("http://127.0.0.1:8001/carrier/quote", {
           method: "POST",
@@ -200,7 +126,6 @@ const handleOptimize = async () => {
 
         const mcpWrapper = await courierRes.json();
         
-        // Check if response has data and proper structure
         if (!mcpWrapper.data || !mcpWrapper.data[0] || !mcpWrapper.data[0].text) {
           setQuoteError("Invalid response structure from backend");
           throw new Error("Invalid MCP response structure");
@@ -210,7 +135,6 @@ const handleOptimize = async () => {
         try {
           shiprocketResponse = JSON.parse(mcpWrapper.data[0].text);
         } catch (parseError) {
-          console.error("Failed to parse Shiprocket response:", mcpWrapper.data[0].text);
           setQuoteError("Backend error: " + mcpWrapper.data[0].text);
           throw new Error("Failed to parse Shiprocket response");
         }
@@ -264,7 +188,7 @@ const handleOptimize = async () => {
     } finally {
       setIsLoading(false);
     }
-  };;
+  };
 
   const handleRemoveItem = (id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id));
@@ -274,8 +198,75 @@ const handleOptimize = async () => {
     }
   };
 
+  // ─── NEW BOOKING HANDLERS ──────────────────────────────────────
+  
   const handleBookCourier = (courier: any) => {
-    console.log("Booking initiated:", courier.courier_name);
+    // Open the modal and set the selected courier
+    setSelectedBookingCourier(courier);
+    setIsBookingModalOpen(true);
+  };
+
+  const handleConfirmBooking = async (formData: any) => {
+    if (!selectedBookingCourier || !result) return;
+    setIsBookingSubmit(true);
+
+    try {
+      // Map frontend Modal data to Shiprocket payload format
+      const orderDetails = {
+        order_id: `TATVA-CON-${Math.floor(1000 + Math.random() * 9000)}`, // Generate random Order ID
+        order_date: new Date().toISOString().split('T')[0],
+        customer_name: formData.receiverName,
+        address: formData.receiverAddress,
+        city: "Destination City", // Could prompt for this, but acceptable default for API
+        pincode: routeInfo.deliveryPincode,
+        state: "Destination State",
+        country: "India",
+        phone: formData.receiverPhone,
+        email: "customer@tatvaops.com",
+        length: autoDims.l || 10,
+        width: autoDims.w || 10,
+        height: autoDims.h || 10,
+        weight: result.chargeableWeight || 1,
+        items: items.length > 0 
+          ? items.map(i => ({ name: i.material_type || "Logistics Cargo", sku: "TC-SKU", units: 1, selling_price: 100 })) 
+          : [{ name: "Box", sku: "TC-BOX", units: 1, selling_price: 100 }]
+      };
+
+      const payload = {
+        carrier_id: selectedBookingCourier.courier_company_id,
+        order_details: orderDetails
+      };
+
+      const response = await fetch("http://127.0.0.1:8001/carrier/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      
+      // Parse the MCP output string
+      let parsedResult;
+      try {
+        parsedResult = JSON.parse(data.data[0].text);
+      } catch (e) {
+        throw new Error(data.data[0].text);
+      }
+
+      if (parsedResult.status === "success") {
+        // ✅ SUCCESS: Order created (even if AWB generation pending)
+        setBookingSuccessData(parsedResult);
+        setIsBookingModalOpen(false);
+      } else {
+        alert(`❌ Booking Failed: ${parsedResult.message || JSON.stringify(parsedResult)}`);
+      }
+
+    } catch (error) {
+      console.error("Booking failed:", error);
+      alert(`Booking Connection Error: ${error}`);
+    } finally {
+      setIsBookingSubmit(false);
+    }
   };
 
   // ─── RENDER LOGIC ──────────────────────────────────────────────────
@@ -302,7 +293,7 @@ const handleOptimize = async () => {
   }
 
   return (
-    <div className="min-h-screen bg-background py-12 px-4 font-sans text-foreground">
+    <div className="min-h-screen bg-background py-12 px-4 font-sans text-foreground relative">
       <div className="max-w-[1200px] mx-auto space-y-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -313,6 +304,46 @@ const handleOptimize = async () => {
             ← Switch Service
           </button>
         </div>
+
+        {/* Success Banner if booking goes through */}
+        {bookingSuccessData && (
+          <div className="p-6 bg-gradient-to-r from-green-50 to-blue-50 border-4 border-green-600 rounded-lg animate-in fade-in slide-in-from-top-4 shadow-lg">
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="text-2xl font-black uppercase text-green-800">🎉 Order Created Successfully!</h3>
+              <button 
+                onClick={() => setBookingSuccessData(null)}
+                className="text-2xl text-gray-400 hover:text-gray-600 cursor-pointer">✕</button>
+            </div>
+            
+            {/* Main Information Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-bold mb-4">
+              <div className="bg-white p-3 rounded border-2 border-green-200">
+                <p className="text-[10px] text-green-600 uppercase">Order ID</p>
+                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.shiprocket_order_id}</p>
+              </div>
+              <div className="bg-white p-3 rounded border-2 border-green-200">
+                <p className="text-[10px] text-green-600 uppercase">Shipment ID</p>
+                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.shipment_id}</p>
+              </div>
+              <div className="bg-white p-3 rounded border-2 border-blue-200">
+                <p className="text-[10px] text-blue-600 uppercase">AWB Tracking</p>
+                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.awb_tracking_number || 'Pending'}</p>
+              </div>
+              <div className="bg-white p-3 rounded border-2 border-blue-200">
+                <p className="text-[10px] text-blue-600 uppercase">Courier</p>
+                <p className="text-lg text-gray-900">{bookingSuccessData.courier_name || 'TBD'}</p>
+              </div>
+            </div>
+            
+            {/* Status Messages */}
+            {bookingSuccessData.message && (
+              <p className="text-sm text-green-700 bg-green-100 p-3 rounded mb-2 font-semibold">✅ {bookingSuccessData.message}</p>
+            )}
+            {bookingSuccessData.awb_note && (
+              <p className="text-sm text-blue-700 bg-blue-100 p-3 rounded font-semibold">📌 {bookingSuccessData.awb_note}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           <div className="lg:col-span-7 space-y-6">
@@ -364,10 +395,22 @@ const handleOptimize = async () => {
                 truckingQuotes={allQuotes}
                 mode={serviceType} 
                 onSelectCourier={handleBookCourier} 
+                isLoading={isLoading}
               />
           </div>
         </div>
       </div>
+
+      {/* ── BOOKING MODAL ── */}
+      <BookingModal 
+        isOpen={isBookingModalOpen} 
+        onClose={() => setIsBookingModalOpen(false)} 
+        courier={selectedBookingCourier} 
+        routeInfo={routeInfo} 
+        onConfirm={handleConfirmBooking} 
+        isBooking={isBookingSubmit} 
+      />
+
     </div>
   );
 }
