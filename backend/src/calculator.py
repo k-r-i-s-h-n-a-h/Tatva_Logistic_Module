@@ -107,3 +107,32 @@ class LogisticsCalculator:
             "item_count": len(self.items),
             "ai_mode": True
         }
+    
+    def calculate_estimated_fare(self, vehicle_name, distance_km):
+    # Live Bengaluru Production Floor Rates
+        MARKET_FLOORS = {
+            "Tata Ace (7ft)": 1500,
+            "Pickup / Dost (8ft)": 4750,
+            "3-Wheeler": 250
+        }
+        
+        # Base rates for calculations beyond the floor distance
+        BASE_RATES = {
+            "Tata Ace (7ft)": {"base": 450, "per_km": 25},
+            "Pickup / Dost (8ft)": {"base": 700, "per_km": 35}
+        }
+
+        config = BASE_RATES.get(vehicle_name, {"base": 0, "per_km": 0})
+        theoretical_fare = config["base"] + (distance_km * config["per_km"])
+        
+        # ✅ Return the higher of the two (The "Market Floor")
+        return max(theoretical_fare, MARKET_FLOORS.get(vehicle_name, 0))
+
+    # Update your calculate_metrics to include a "raw" summary
+    def get_summary(self, metrics, distance_km, selected_vehicle):
+        fare = self.calculate_estimated_fare(selected_vehicle, distance_km)
+        return {
+            "estimated_fare": f"₹{round(fare)}",
+            "distance": f"{distance_km} km",
+            "vehicle": selected_vehicle['name']
+        }

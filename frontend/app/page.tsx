@@ -11,6 +11,7 @@ import { DeliveryItem, RouteInfo, OptimizationResult } from "@/lib/logistics"
 import { Button } from "@/components/ui/button"
 import { GoogleMapsPicker } from "@/components/GoogleMapsPicker"
 import { BookingModal } from "@/components/BookingModal" // ← IMPORTED MODAL
+import { TruckBookingModal } from "@/components/TruckBookingModal" // ← ADD THIS
 
 export default function Home() {
   const [serviceType, setServiceType] = useState<'courier' | 'trucking' | null>(null);
@@ -34,6 +35,12 @@ export default function Home() {
   const [selectedBookingCourier, setSelectedBookingCourier] = useState<any>(null);
   const [isBookingSubmit, setIsBookingSubmit] = useState(false);
   const [bookingSuccessData, setBookingSuccessData] = useState<any>(null);
+
+  // ─── TRUCKING BOOKING STATES ──────────────────────────────────────────
+  const [isTruckModalOpen, setIsTruckModalOpen] = useState(false);
+  const [selectedTruck, setSelectedTruck] = useState<any>(null);
+  const [isTruckBookingSubmit, setIsTruckBookingSubmit] = useState(false);
+  const [borzoSuccessData, setBorzoSuccessData] = useState<any>(null);
 
   // ─── HANDLERS ──────────────────────────────────────────────────────────
 
@@ -206,6 +213,46 @@ export default function Home() {
     setIsBookingModalOpen(true);
   };
 
+  const handleSelectTruck = (truck: any) => {
+    setSelectedTruck(truck);
+    setIsTruckModalOpen(true);
+  };
+
+  const handleConfirmTruckBooking = async (formData: any) => {
+    if (!selectedTruck || !routeInfo.pickupCoords || !routeInfo.deliveryCoords) return;
+    setIsTruckBookingSubmit(true);
+
+    try {
+      const res = await fetch("http://localhost:8001/carrier/trucking-book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          carrier: "Borzo",
+          vehicle_type_id: selectedTruck.vehicle_type_id || 8,
+          pickup_lat: routeInfo.pickupCoords.lat,
+          pickup_lng: routeInfo.pickupCoords.lng,
+          delivery_lat: routeInfo.deliveryCoords.lat,
+          delivery_lng: routeInfo.deliveryCoords.lng,
+          contact_phone: formData.receiverPhone, // ✅ Grabbing phone from Modal!
+          weight_kg: result?.chargeableWeight || 0,
+          matter: items[0]?.material_type || "Construction material"
+        })
+      });
+      const data = await res.json();
+      
+      if (data.status === "success") {
+        setBorzoSuccessData(data); // ✅ Save success data
+        setIsTruckModalOpen(false); // Close Modal
+      } else {
+        alert(`❌ Borzo Booking Failed: ${data.message}`);
+      }
+    } catch (error) {
+      alert(`Connection Error: ${error}`);
+    } finally {
+      setIsTruckBookingSubmit(false);
+    }
+  };
+
   const handleConfirmBooking = async (formData: any) => {
     if (!selectedBookingCourier || !result) return;
     setIsBookingSubmit(true);
@@ -254,6 +301,7 @@ export default function Home() {
       }
 
       if (parsedResult.status === "success") {
+        parsedResult.requested_courier = selectedBookingCourier.courier_name;
         // ✅ SUCCESS: Order created (even if AWB generation pending)
         setBookingSuccessData(parsedResult);
         setIsBookingModalOpen(false);
@@ -300,12 +348,24 @@ export default function Home() {
             <h1 className="text-4xl font-black uppercase tracking-tight mb-2">Logistics Optimizer</h1>
             <p className="text-muted-foreground font-medium italic">Expert guidance for your {serviceType} needs</p>
           </div>
-          <button onClick={() => setServiceType(null)} className="text-xs font-bold uppercase tracking-widest border-2 border-black px-6 py-2 hover:bg-black hover:text-white transition-all w-fit shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none">
+          <button 
+            onClick={() => {
+              setServiceType(null);
+              setItems([]);
+              setResult(null);
+              setCarrierQuotes([]);
+              setAllQuotes([]);
+              setRouteInfo({ pickupPincode: '', deliveryPincode: '', pickupCoords: undefined, deliveryCoords: undefined });
+              setBookingSuccessData(null); // ✅ Clear Shiprocket Banner
+            }} 
+            className="text-xs font-bold uppercase tracking-widest border-2 border-black px-6 py-2 hover:bg-black hover:text-white transition-all w-fit shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none"
+          >
             ← Switch Service
           </button>
         </div>
 
         {/* Success Banner if booking goes through */}
+        {/*
         {bookingSuccessData && (
           <div className="p-6 bg-gradient-to-r from-green-50 to-blue-50 border-4 border-green-600 rounded-lg animate-in fade-in slide-in-from-top-4 shadow-lg">
             <div className="flex items-start justify-between mb-4">
@@ -315,7 +375,7 @@ export default function Home() {
                 className="text-2xl text-gray-400 hover:text-gray-600 cursor-pointer">✕</button>
             </div>
             
-            {/* Main Information Grid */}
+           
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-bold mb-4">
               <div className="bg-white p-3 rounded border-2 border-green-200">
                 <p className="text-[10px] text-green-600 uppercase">Order ID</p>
@@ -335,7 +395,7 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Status Messages */}
+        
             {bookingSuccessData.message && (
               <p className="text-sm text-green-700 bg-green-100 p-3 rounded mb-2 font-semibold">✅ {bookingSuccessData.message}</p>
             )}
@@ -344,6 +404,7 @@ export default function Home() {
             )}
           </div>
         )}
+        */}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           <div className="lg:col-span-7 space-y-6">
@@ -390,13 +451,23 @@ export default function Home() {
 
           <div className="lg:col-span-5 sticky top-8">
              <ResultsDashboard 
-                result={result} 
-                quotes={carrierQuotes} 
-                truckingQuotes={allQuotes}
-                mode={serviceType} 
-                onSelectCourier={handleBookCourier} 
-                isLoading={isLoading}
-              />
+              result={result} 
+              quotes={carrierQuotes}
+              truckingQuotes={allQuotes}
+              mode={serviceType} 
+              onSelectCourier={handleBookCourier}
+              onSelectTruck={handleSelectTruck}
+              pickupCoords={routeInfo.pickupCoords}
+              deliveryCoords={routeInfo.deliveryCoords}
+              
+              // Shiprocket Banner Props
+              bookingSuccessData={bookingSuccessData}
+              onClearBooking={() => setBookingSuccessData(null)}
+              
+              // ✅ ADDED: Borzo Banner Props!
+              borzoSuccessData={borzoSuccessData}
+              onClearBorzoBooking={() => setBorzoSuccessData(null)}
+            />
           </div>
         </div>
       </div>
@@ -409,6 +480,15 @@ export default function Home() {
         routeInfo={routeInfo} 
         onConfirm={handleConfirmBooking} 
         isBooking={isBookingSubmit} 
+      />
+
+      {/* ── TRUCK BOOKING MODAL ── */}
+      <TruckBookingModal
+        isOpen={isTruckModalOpen}
+        onClose={() => setIsTruckModalOpen(false)}
+        truck={selectedTruck}
+        isBooking={isTruckBookingSubmit}
+        onConfirm={handleConfirmTruckBooking}
       />
 
     </div>

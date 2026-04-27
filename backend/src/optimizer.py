@@ -9,41 +9,44 @@ class LogisticsOptimizer:
             print("Warning: LOCATION_IQ_TOKEN not found in .env")
 
         self.vehicles = [
-            {
+        {
                 "name": "2-Wheeler (Bike)",
                 "max_weight_kg": 20,
                 "max_dim_cm": 40,
                 "max_width_cm": 40,
-                "cabin_height_cm": 0, # No cabin lean possible
-                "max_vol_cm3": 64000, # 40x40x40 box
+                "cabin_height_cm": 0,
+                "max_vol_cm3": 64000,
                 "base_fare": 40,
                 "per_km": 10,
-                "best_for": "Instant Deliveries, small hardware, documents",
-                "providers": [{"name": "Borzo", "url": "https://borzodelivery.com/"}, {"name": "Porter", "url": "https://porter.in/"}]
+                "borzo_type_id": 7, # Live Production ID
+                "best_for": "Instant Deliveries, small hardware",
+                "providers": [{"name": "Borzo", "url": "https://borzodelivery.com/"}]
             },
             {
-                "name": "3-Wheeler",
-                "max_weight_kg": 500,
+                "name": "3-Wheeler (Ape)",
+                "max_weight_kg": 300,
                 "max_dim_cm": 150, 
                 "max_width_cm": 120, 
                 "cabin_height_cm": 130, 
                 "max_vol_cm3": 2490000,
-                "base_fare": 250,
+                "base_fare": 250, # Local market start
                 "per_km": 18,
+                "borzo_type_id": 8, # Live Production ID
                 "best_for": "Local paint/hardware deliveries",
-                "providers": [{"name": "Porter", "url": "https://porter.in/"}, {"name": "Blowhorn", "url": "https://blowhorn.com/"}]
+                "providers": [{"name": "Borzo", "url": "https://borzodelivery.com/"}]
             },
             {
                 "name": "Tata Ace (7ft)",
-                "max_weight_kg": 750, # Standardized Shiprocket limit
+                "max_weight_kg": 750,
                 "max_dim_cm": 210, 
                 "max_width_cm": 145, 
                 "cabin_height_cm": 140, 
                 "max_vol_cm3": 4450000,
-                "base_fare": 450,
-                "per_km": 22,
+                "base_fare": 1500, # ✅ Updated to match Borzo Live Floor
+                "per_km": 0, # Flat rate for typical city distance
+                "borzo_type_id": 3, # ✅ Live Production ID
                 "best_for": "1-BHK size loads, fragile interiors",
-                "providers": [{"name": "Porter", "url": "https://porter.in/"}, {"name": "Delhivery", "url": "https://www.delhivery.com/"}]
+                "providers": [{"name": "Borzo", "url": "https://borzodelivery.com/"}, {"name": "Porter", "url": "https://porter.in/"}]
             },
             {
                 "name": "Pickup / Dost (8ft)",
@@ -52,10 +55,11 @@ class LogisticsOptimizer:
                 "max_width_cm": 165, 
                 "cabin_height_cm": 150, 
                 "max_vol_cm3": 5600000,
-                "base_fare": 700,
-                "per_km": 28,
+                "base_fare": 4750, # ✅ Updated to match Borzo Live Floor for Type 10
+                "per_km": 0,
+                "borzo_type_id": 10, # ✅ Live Production ID
                 "best_for": "Plywood, small batches of tiles",
-                "providers": [{"name": "Porter", "url": "https://porter.in/"}, {"name": "Mahindra Logistics", "url": "https://mahindralogistics.com/"}]
+                "providers": [{"name": "Borzo", "url": "https://borzodelivery.com/"}]
             },
             {
                 "name": "Tata 407 (10ft)",

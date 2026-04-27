@@ -525,8 +525,103 @@ async def get_all_trucking(request: dict):
             p_lng=request.get("pickup_lng"),
             d_lat=request.get("delivery_lat"),
             d_lng=request.get("delivery_lng"),
+            weight_kg=request.get("weight_kg", 0.0),
+            matter=request.get("matter", "Construction material"),
         )
         return {"status": "success", "data": quotes}
     except Exception as e:
         print(f"Trucking Aggregator Error: {e}")
         return {"status": "error", "message": str(e)}
+
+class TruckingBookRequest(BaseModel):
+    carrier: str  # "Borzo", "Blowhorn", etc.
+    vehicle_type_id: int 
+    pickup_lat: float
+    pickup_lng: float
+    delivery_lat: float
+    delivery_lng: float
+    contact_phone: str
+    weight_kg: float = 0.0
+    matter: str = "Construction material"
+
+@app.post("/carrier/trucking-book")
+async def book_trucking(request: TruckingBookRequest):
+    if request.carrier == "Borzo":
+        token = os.getenv("BORZO_API_TOKEN")
+        base_url = os.getenv("BORZO_API_URL")
+
+        if not token or not base_url:
+            raise HTTPException(status_code=500, detail="Borzo credentials missing")
+
+        headers = {
+            "X-DV-Auth-Token": token,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "matter": request.matter,
+            "vehicle_type_id": request.vehicle_type_id,
+            "total_weight_kg": request.weight_kg,
+            "points": [
+                {
+                    "address": f"{request.pickup_lat}, {request.pickup_lng}",
+                    "latitude": str(request.pickup_lat),
+                    "longitude": str(request.pickup_lng),
+                    "contact_person": {
+                        "name": "TatvaConnect User",
+                        "phone": request.contact_phone
+                    }
+                },
+                {
+                    "address": f"{request.delivery_lat}, {request.delivery_lng}",
+                    "latitude": str(request.delivery_lat),
+                    "longitude": str(request.delivery_lng),
+                    "contact_person": {
+                        "name": "TatvaConnect User",
+                        "phone": request.contact_phone
+                    }
+                }
+            ]
+        }
+
+        def _sync_call():
+            return requests.post(
+                f"{base_url}/create-order",
+                json=payload, headers=headers, timeout=8
+            )
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, _sync_call)
+            data = response.json()
+
+            if data.get("is_successful"):
+                order = data["order"]
+                tracking = order.get("points", [{}, {}])
+                tracking_url = tracking[1].get("tracking_url") if len(tracking) > 1 else None
+                return {
+                    "status": "success",
+                    "carrier": "Borzo",
+                    "order_id": order.get("order_id"),
+                    "fare": order.get("payment_amount"),
+                    "vehicle_type_id": order.get("vehicle_type_id"),
+                    "tracking_url": tracking_url
+                }
+            return {
+                "status": "error",
+                "message": str(data.get("warnings", "Borzo booking failed"))
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Placeholder for future carriers
+    return {"status": "error", "message": f"Carrier '{request.carrier}' booking not supported yet"}
+
+#  to test actual Borzo vehicle ids
+@app.post("/borzo/vehicles") # Change this from .get to .post
+async def get_live_borzo_vehicles():
+    token = os.getenv("BORZO_API_TOKEN")
+    url = "https://robot-in.borzodelivery.com/api/business/1.6/vehicle-types"
+    headers = {"X-DV-Auth-Token": token}
+    # Some Borzo versions require an empty json body {} for this POST
+    response = requests.post(url, headers=headers, json={}) 
+    return response.json()
