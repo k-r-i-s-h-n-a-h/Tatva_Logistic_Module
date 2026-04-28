@@ -57,7 +57,7 @@ app.add_middleware(
 optimizer = LogisticsOptimizer()
 analyst   = LogisticsAnalyst(optimizer.vehicles)
 client    = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-sam_model = SAM("sam2.1_t.pt")
+sam_model = None
 
 
 
@@ -163,7 +163,14 @@ def haversine(lat1, lon1, lat2, lon2):
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 1 — ANALYZE
 # ─────────────────────────────────────────────────────────────────────────────
-
+def get_sam_model():
+    global sam_model
+    if sam_model is None:
+        print("First request received. Loading SAM 2.1 into RAM...")
+        # The 'import' is also inside here to save memory during startup
+        from ultralytics import SAM 
+        sam_model = SAM("sam2.1_t.pt")
+    return sam_model
 @app.post("/cargo/analyze")
 async def analyze_cargo(image: UploadFile = File(...), view_type: str = Form(...)):
     temp_path = f"temp_{image.filename}"
@@ -175,30 +182,30 @@ async def analyze_cargo(image: UploadFile = File(...), view_type: str = Form(...
 
         # ── Step 1: Gemini spatial grounding ─────────────────────────────
         vlm_prompt = """
-You are a logistics cargo measurement assistant.
+            You are a logistics cargo measurement assistant.
 
-TASK:
-1. Find the SINGLE PRIMARY cargo item — the ONE box/sack/package that is the
-   main subject (closest to camera, most centred, largest foreground item).
-2. Find the REFERENCE OBJECT — a water bottle (~25 cm tall) placed beside the
-   cargo for scale calibration.
+            TASK:
+            1. Find the SINGLE PRIMARY cargo item — the ONE box/sack/package that is the
+            main subject (closest to camera, most centred, largest foreground item).
+            2. Find the REFERENCE OBJECT — a water bottle (~25 cm tall) placed beside the
+            cargo for scale calibration.
 
-RULES:
-- Draw TIGHT bounding boxes that closely hug each individual object.
-- Do NOT let the cargo box include background shelves, floor, walls, or
-  adjacent boxes — only the single primary foreground item.
-- If the reference bottle is NOT visible in the image set its box_2d to
-  [0,0,0,0] and set "bottle_present" to false.
-- When unsure, draw the box SMALLER rather than larger.
+            RULES:
+            - Draw TIGHT bounding boxes that closely hug each individual object.
+            - Do NOT let the cargo box include background shelves, floor, walls, or
+            adjacent boxes — only the single primary foreground item.
+            - If the reference bottle is NOT visible in the image set its box_2d to
+            [0,0,0,0] and set "bottle_present" to false.
+            - When unsure, draw the box SMALLER rather than larger.
 
-Return ONLY valid JSON, no markdown:
-{
-  "cargo":          { "category": "string", "is_fragile": boolean, "box_2d": [ymin, xmin, ymax, xmax] },
-  "reference":      { "label": "string",    "box_2d": [ymin, xmin, ymax, xmax] },
-  "bottle_present": true
-}
-All coordinates are integers 0–1000.
-"""
+            Return ONLY valid JSON, no markdown:
+            {
+            "cargo":          { "category": "string", "is_fragile": boolean, "box_2d": [ymin, xmin, ymax, xmax] },
+            "reference":      { "label": "string",    "box_2d": [ymin, xmin, ymax, xmax] },
+            "bottle_present": true
+            }
+            All coordinates are integers 0–1000.
+            """
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[
@@ -249,7 +256,8 @@ All coordinates are integers 0–1000.
         if not bottle_missing:
             bboxes.append(to_px(ref_box))
 
-        sam_results = sam_model.predict(source=temp_path, bboxes=bboxes, verbose=False)
+        model = get_sam_model()
+        sam_results = model.predict(source=temp_path, bboxes=bboxes, verbose=False)
 
         if not sam_results or len(sam_results[0].masks.data) < 1:
             return _fallback("SAM returned no masks — please enter dimensions manually.", "sam_failed")
