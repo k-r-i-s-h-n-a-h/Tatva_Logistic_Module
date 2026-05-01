@@ -104,77 +104,117 @@ export function LoginScreen({ isModal = false, onClose, initialIntent = 'login' 
   };
 
  return (
-    <div className="w-full relative min-h-[150px]">
-      {/* Redirection Overlay */}
-      {redirectMsg && (
-        <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center animate-in fade-in">
-          <div className="w-8 h-8 border-4 border-black border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-xs font-black uppercase text-center">{redirectMsg}</p>
-        </div>
-      )}
+  <div className="w-full relative min-h-[150px]">
 
-      {error && <div className="p-3 mb-4 border-2 border-red-500 bg-red-50 text-red-700 font-bold text-[10px] uppercase">{error}</div>}
+    {/* Redirect overlay */}
+    {redirectMsg && (
+      <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center animate-in fade-in gap-3">
+        <div className="w-6 h-6 border-4 border-black border-t-transparent rounded-full animate-spin" />
+        <p className="text-[10px] font-black uppercase text-center text-slate-600">{redirectMsg}</p>
+      </div>
+    )}
 
-     {/* STEP 1: PHONE INPUT */}
-     {step === 'phone' && (
-        <form onSubmit={handleSendOtp} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase text-slate-500">Phone Number</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">+91</span>
-              <Input 
-                type="tel" 
-                value={phoneNumber} 
-                onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                className="border-2 border-black pl-10"
-                required
-              />
-            </div>
-          </div>
-          <Button type="submit" className="w-full bg-black text-white" disabled={isLoading}>
-              {isLoading ? "Sending..." : "Get OTP →"}
-          </Button>
-        </form>
-      )}
+    {/* Error */}
+    {error && (
+      <div className="p-3 mb-4 border-2 border-red-500 bg-red-50 text-red-700 font-bold text-[10px] uppercase flex items-center gap-2">
+        <span>⚠</span> {error}
+      </div>
+    )}
 
-      {/* STEP 2: OTP INPUT */}
-      {step === 'otp' && (
-        <form onSubmit={handleVerifyOtp} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase text-slate-500">6-Digit Code</label>
-            <Input 
-              type="text" 
-              value={otp} 
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              className="border-2 border-black text-center tracking-[0.5em] font-black"
+    {/* STEP 1: Phone */}
+    {step === 'phone' && (
+      <form onSubmit={handleSendOtp} className="space-y-5">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Phone Number
+          </label>
+          <div className="flex border-2 border-black focus-within:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all">
+            <span className="px-3 py-2.5 bg-slate-100 border-r-2 border-black font-black text-sm text-slate-600">
+              +91
+            </span>
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+              className="flex-1 px-3 py-2.5 outline-none font-bold text-sm"
+              placeholder="Enter 10-digit number"
               required
             />
           </div>
-          <Button type="submit" className="w-full bg-black text-white" disabled={isLoading}>
-              {isLoading ? "Verifying..." : "Verify & Continue"}
-          </Button>
-        </form>
-      )}
+        </div>
+        <button
+          type="submit"
+          disabled={isLoading || phoneNumber.length < 10}
+          className="w-full py-3 bg-black text-white font-black uppercase text-xs tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-50 disabled:translate-x-0 disabled:translate-y-0 disabled:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)]"
+        >
+          {isLoading ? "Sending OTP..." : "Get OTP →"}
+        </button>
+      </form>
+    )}
 
-      {/* STEP 3: REGISTRATION FORM */}
-      {step === 'register_form' && (
-        <div className="space-y-4 animate-in slide-in-from-right-4">
-          <ProfileSettings 
-            isModalView={true} 
-            onComplete={() => triggerSuccess("Registered successfully!")} 
+    {/* STEP 2: OTP */}
+    {step === 'otp' && (
+      <form onSubmit={handleVerifyOtp} className="space-y-5">
+        <div className="space-y-1.5">
+          <div className="flex justify-between items-center">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              6-Digit OTP
+            </label>
+            <span className="text-[10px] text-slate-400 font-bold">
+              Sent to +91 {phoneNumber}
+            </span>
+          </div>
+          <input
+            type="text"
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            className="w-full border-2 border-black px-4 py-3 text-center tracking-[0.8em] font-black text-xl outline-none focus:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all"
+            placeholder="••••••"
+            required
           />
         </div>
-      )}
+        <button
+          type="submit"
+          disabled={isLoading || otp.length < 6}
+          className="w-full py-3 bg-black text-white font-black uppercase text-xs tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-50"
+        >
+          {isLoading ? "Verifying..." : "Verify & Continue →"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setStep('phone')}
+          className="w-full text-[10px] font-bold uppercase text-slate-400 hover:text-black transition-colors"
+        >
+          ← Change number
+        </button>
+      </form>
+    )}
 
-      {/* STEP 4: SUCCESS SCREEN */}
-      {step === 'success' && (
-        <div className="flex flex-col items-center justify-center py-8 animate-in zoom-in-95 duration-300">
-          <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center border-4 border-black mb-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"></path></svg>
-          </div>
-          <h3 className="text-lg font-black uppercase text-center">{successMsg}</h3>
+    {/* STEP 3: Registration Form */}
+    {step === 'register_form' && (
+      <div className="space-y-4 animate-in slide-in-from-right-4">
+        <ProfileSettings
+          isModalView={true}
+          onComplete={() => triggerSuccess("Registered successfully!")}
+        />
+      </div>
+    )}
+
+    {/* STEP 4: Success */}
+    {step === 'success' && (
+      <div className="flex flex-col items-center justify-center py-10 animate-in zoom-in-95 duration-300 gap-4">
+        <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)]">
+          <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+          </svg>
         </div>
-      )}
-    </div>
-  );
+        <div className="text-center">
+          <h3 className="text-lg font-black uppercase">{successMsg}</h3>
+          <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Redirecting...</p>
+        </div>
+      </div>
+    )}
+
+  </div>
+);
 }
