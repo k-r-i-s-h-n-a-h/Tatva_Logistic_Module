@@ -38,54 +38,69 @@ export function BookingModal({ isOpen, onClose, courier, routeInfo, onConfirm, i
   };
 
   // ── INITIALIZE GOOGLE MAPS AUTOCOMPLETE ──
-  useEffect(() => {
-    if (isOpen) {
-      setPickupError(null);
-      setDeliveryError(null);
-    }
+useEffect(() => {
+  if (!isOpen || !(window as any).google?.maps?.places) return;
 
-    // Only run if the modal is open and the Google Maps script is loaded
-    if (!isOpen || !(window as any).google || !(window as any).google.maps || !(window as any).google.maps.places) return;
+  // ← Add 'address_components' to fields
+  const options = {
+    componentRestrictions: { country: 'in' },
+    fields: ['formatted_address', 'address_components'],
+  };
 
-    let pickupAutocomplete: any;
-    let deliveryAutocomplete: any;
+  let pickupAC: any, deliveryAC: any;
 
-    const options = {
-      componentRestrictions: { country: 'in' }, // Restrict to India
-      fields: ['formatted_address'],
-    };
+  if (pickupAddrRef.current) {
+    pickupAC = new (window as any).google.maps.places.Autocomplete(pickupAddrRef.current, options);
+    pickupAC.addListener('place_changed', () => {
+      const place = pickupAC.getPlace();
+      const addr = place.formatted_address || '';
+      setPickupAddress(addr);
 
-    // Attach to Pickup Input
-    if (pickupAddrRef.current) {
-      pickupAutocomplete = new (window as any).google.maps.places.Autocomplete(pickupAddrRef.current, options);
-      pickupAutocomplete.addListener('place_changed', () => {
-        const place = pickupAutocomplete.getPlace();
-        if (place.formatted_address) {
-          setPickupAddress(place.formatted_address);
-          setPickupError(validateAddress(place.formatted_address, routeInfo?.pickupPincode || ''));
-        }
-      });
-    }
+      // Extract actual pincode from Google's response
+      const postalComp = place.address_components?.find((c: any) =>
+        c.types.includes('postal_code')
+      );
+      const actualPin = postalComp?.long_name || '';
+      const expectedPin = routeInfo?.pickupPincode || '';
 
-    // Attach to Delivery Input
-    if (deliveryAddrRef.current) {
-      deliveryAutocomplete = new (window as any).google.maps.places.Autocomplete(deliveryAddrRef.current, options);
-      deliveryAutocomplete.addListener('place_changed', () => {
-        const place = deliveryAutocomplete.getPlace();
-        if (place.formatted_address) {
-          setDeliveryAddress(place.formatted_address);
-          setDeliveryError(validateAddress(place.formatted_address, routeInfo?.deliveryPincode || ''));
-        }
-      });
-    }
+      if (actualPin && actualPin !== expectedPin) {
+        setPickupError(`❌ This location is in pincode ${actualPin}, but you need ${expectedPin}. Please select a different address.`);
+      } else if (!actualPin) {
+        setPickupError(`⚠️ Could not verify pincode. Please ensure this address is within ${expectedPin}.`);
+      } else {
+        setPickupError(null); // ✅ Match
+      }
+    });
+  }
 
-    // Cleanup listeners when modal closes
-    return () => {
-      if (pickupAutocomplete) (window as any).google.maps.event.clearInstanceListeners(pickupAutocomplete);
-      if (deliveryAutocomplete) (window as any).google.maps.event.clearInstanceListeners(deliveryAutocomplete);
-    };
-  // ✅ FIX: Pass specific string dependencies instead of the whole `routeInfo` object
-  }, [isOpen, routeInfo?.pickupPincode, routeInfo?.deliveryPincode]); 
+  if (deliveryAddrRef.current) {
+    deliveryAC = new (window as any).google.maps.places.Autocomplete(deliveryAddrRef.current, options);
+    deliveryAC.addListener('place_changed', () => {
+      const place = deliveryAC.getPlace();
+      const addr = place.formatted_address || '';
+      setDeliveryAddress(addr);
+
+      const postalComp = place.address_components?.find((c: any) =>
+        c.types.includes('postal_code')
+      );
+      const actualPin = postalComp?.long_name || '';
+      const expectedPin = routeInfo?.deliveryPincode || '';
+
+      if (actualPin && actualPin !== expectedPin) {
+        setDeliveryError(`❌ This location is in pincode ${actualPin}, but you need ${expectedPin}. Please select a different address.`);
+      } else if (!actualPin) {
+        setDeliveryError(`⚠️ Could not verify pincode. Ensure this address is within ${expectedPin}.`);
+      } else {
+        setDeliveryError(null); // ✅ Match
+      }
+    });
+  }
+
+  return () => {
+    if (pickupAC) (window as any).google.maps.event.clearInstanceListeners(pickupAC);
+    if (deliveryAC) (window as any).google.maps.event.clearInstanceListeners(deliveryAC);
+  };
+}, [isOpen, routeInfo?.pickupPincode, routeInfo?.deliveryPincode]);
 
   if (!isOpen) return null;
 
@@ -114,6 +129,16 @@ export function BookingModal({ isOpen, onClose, courier, routeInfo, onConfirm, i
     });
   };
 
+const handleAddressChange = (value: string, type: 'pickup' | 'delivery') => {
+  if (type === 'pickup') {
+    setPickupAddress(value);
+    setPickupError(null); // Clear error while typing, autocomplete will re-validate on select
+  } else {
+    setDeliveryAddress(value);
+    setDeliveryError(null);
+  }
+};
+  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       
@@ -177,13 +202,13 @@ export function BookingModal({ isOpen, onClose, courier, routeInfo, onConfirm, i
                       <span className="text-[10px] font-bold text-blue-600">PIN: {routeInfo?.pickupPincode}</span>
                   </div>
                   <Input 
-                      ref={pickupAddrRef}
-                      value={pickupAddress}
-                      onChange={(e) => handlePickupChange(e.target.value)}
-                      className={`w-full border-2 p-3 font-medium outline-none transition-all rounded-none ${pickupError ? 'border-red-500 bg-red-50' : 'border-slate-200 focus:border-black'}`}
-                      placeholder="Start typing building, street, area..."
-                  />
-                  {pickupError && <p className="text-[10px] font-bold text-red-600 mt-1">{pickupError}</p>}
+                    ref={pickupAddrRef}
+                    value={pickupAddress} 
+                    onChange={(e) => handleAddressChange(e.target.value, 'pickup')}
+                    placeholder={`Search address in pincode ${routeInfo?.deliveryPincode}...`}
+                />
+                {/* Render the error if it exists */}
+                {pickupError && <p className="text-xs text-red-600 font-bold mt-1">{pickupError}</p>}
                 </div>
               </div>
             </div>
@@ -222,11 +247,11 @@ export function BookingModal({ isOpen, onClose, courier, routeInfo, onConfirm, i
                   <Input 
                     ref={deliveryAddrRef}
                     value={deliveryAddress} 
-                    onChange={(e) => handleDeliveryChange(e.target.value)} 
-                    className={`w-full border-2 p-3 font-medium outline-none transition-all rounded-none ${deliveryError ? 'border-red-500 bg-red-50' : 'border-slate-200 focus:border-black'}`}
-                    placeholder="Search or type delivery address..." 
-                  />
-                  {deliveryError && <p className="text-[10px] font-bold text-red-600 mt-1">{deliveryError}</p>}
+                    onChange={(e) => handleAddressChange(e.target.value, 'delivery')}
+                    placeholder="Search or type delivery address..."
+                />
+                {/* Render the error if it exists */}
+                {deliveryError && <p className="text-xs text-red-600 font-bold mt-1">{deliveryError}</p>}
                 </div>
               </div>
             </div>

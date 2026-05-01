@@ -34,13 +34,15 @@ export function InstantDeliveryForm({ onAddItem }: InstantDeliveryFormProps) {
     const standard = ITEM_STANDARDS[materialType as keyof typeof ITEM_STANDARDS]
     const newItem: DeliveryItem = {
       id: Date.now().toString(),
-      materialType,
-      length: standard.length,
-      width: standard.width,
-      height: standard.height,
+      material_type: materialType,
+      category: "General",
+      length: standard.l,        
+      width: standard.w,          
+      height: standard.h,         
       weight: standard.weight,
       quantity: parseInt(quantity),
-      packagingShape,
+      shape: packagingShape,      
+      is_fragile: false,          
     }
 
     onAddItem(newItem)
@@ -74,13 +76,13 @@ export function InstantDeliveryForm({ onAddItem }: InstantDeliveryFormProps) {
           <Label className="uppercase text-xs font-semibold tracking-wide">Auto-filled Standard Dimensions</Label>
           <div className="flex gap-2 flex-wrap">
             <Badge variant="secondary">
-              {selectedStandard.length}cm L
+              {selectedStandard.l}cm L
             </Badge>
             <Badge variant="secondary">
-              {selectedStandard.width}cm W
+              {selectedStandard.w}cm W
             </Badge>
             <Badge variant="secondary">
-              {selectedStandard.height}cm H
+              {selectedStandard.h}cm H
             </Badge>
             <Badge variant="secondary">
               {selectedStandard.weight}kg

@@ -11,9 +11,17 @@ import { DeliveryItem, RouteInfo, OptimizationResult } from "@/lib/logistics"
 import { Button } from "@/components/ui/button"
 import { GoogleMapsPicker } from "@/components/GoogleMapsPicker"
 import { BookingModal } from "@/components/BookingModal" // ← IMPORTED MODAL
-import { TruckBookingModal } from "@/components/TruckBookingModal" // ← ADD THIS
+import { TruckBookingModal } from "@/components/TruckBookingModal" 
+import { useAuth } from '@/context/AuthContext';
+import { LoginModal } from '@/components/LoginModal';
+import { UserMenu } from "@/components/UserMenu"; 
+import { AccountDrawer } from "@/components/AccountDrawer";
 
 export default function Home() {
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8001";
+  const { isAuthenticated, user, logout } = useAuth();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [authIntent, setAuthIntent] = useState<'login' | 'register'>('login')
   const [serviceType, setServiceType] = useState<'courier' | 'trucking' | null>(null);
   const [items, setItems] = useState<DeliveryItem[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInfo>({ 
@@ -75,7 +83,8 @@ export default function Home() {
     }));
   };
 
-  const handleOptimize = async () => {
+const handleOptimize = async () => {
+    // 1. Existing Validation (Keep this first so users aren't asked to log in for an empty form)
     if (items.length === 0) return alert("Please add items to manifest.");
     
     if (serviceType === 'trucking' && (!routeInfo.pickupCoords || !routeInfo.deliveryCoords)) {
@@ -85,13 +94,20 @@ export default function Home() {
       return alert("Please enter both Pickup and Delivery Pincodes.");
     }
 
+    // 🔴 ADDED AUTHENTICATION GATE HERE 🔴
+    if (!isAuthenticated) {
+      setIsLoginModalOpen(true); // Open the modal
+      return; // Stop the function from running the fetch calls
+    }
+
+    // ... Everything below this line remains exactly the same ...
     setIsLoading(true);
     setQuoteError(null);
     setBookingSuccessData(null); // Clear previous booking success
     
     try {
       // --- STEP 1: Cargo Estimation (Physics) ---
-      const estRes = await fetch("http://localhost:8001/cargo/estimate", {
+      const estRes = await fetch(`${backendUrl}/cargo/estimate`, {
         method: "POST", 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
@@ -101,7 +117,7 @@ export default function Home() {
 
       // --- STEP 2: Unified Carrier Quote Fetching ---
       if (serviceType === 'trucking' && routeInfo.pickupCoords && routeInfo.deliveryCoords) {
-        const truckRes = await fetch("http://localhost:8001/carrier/all-trucking-quotes", {
+        const truckRes = await fetch(`${backendUrl}/carrier/all-trucking-quotes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -121,7 +137,7 @@ export default function Home() {
       }
 
       if (serviceType === 'courier') {
-        const courierRes = await fetch("http://127.0.0.1:8001/carrier/quote", {
+        const courierRes = await fetch(`${backendUrl}/carrier/quote`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -159,7 +175,7 @@ export default function Home() {
       }
 
       // --- STEP 3: Fleet Recommendation & UI Update ---
-      const recRes = await fetch("http://localhost:8001/vehicle/recommend", {
+      const recRes = await fetch(`${backendUrl}/vehicle/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -223,7 +239,7 @@ export default function Home() {
     setIsTruckBookingSubmit(true);
 
     try {
-      const res = await fetch("http://localhost:8001/carrier/trucking-book", {
+      const res = await fetch(`${backendUrl}/carrier/trucking-book`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -284,7 +300,7 @@ export default function Home() {
         order_details: orderDetails
       };
 
-      const response = await fetch("http://127.0.0.1:8001/carrier/book", {
+      const response = await fetch(`${backendUrl}/carrier/book`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -317,6 +333,17 @@ export default function Home() {
     }
   };
 
+  // Helper function to get the first letter of the name
+  const getInitials = (name?: string) => {
+    if (!name || name === "Unknown") return "U";
+    return name.charAt(0).toUpperCase();
+  };
+
+  const openAuth = (intent: 'login' | 'register') => {
+    setAuthIntent(intent);
+    setIsLoginModalOpen(true);
+  };
+
   // ─── RENDER LOGIC ──────────────────────────────────────────────────
 
   if (!serviceType) {
@@ -340,14 +367,34 @@ export default function Home() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-background py-12 px-4 font-sans text-foreground relative">
-      <div className="max-w-[1200px] mx-auto space-y-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-black uppercase tracking-tight mb-2">Logistics Optimizer</h1>
-            <p className="text-muted-foreground font-medium italic">Expert guidance for your {serviceType} needs</p>
+return (
+    <div className="min-h-screen bg-background pb-12 font-sans text-foreground relative">
+      
+      {/* ── HEADER ── */}
+      <div className="flex justify-between items-start pt-8 px-6 sm:px-12 max-w-[1200px] mx-auto">
+        <div>
+          <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter">
+            Logistics Optimizer
+          </h1>
+          <p className="text-muted-foreground font-medium italic mt-1">
+            Expert guidance for your {serviceType} needs
+          </p>
+        </div>
+
+        <div className="flex items-center gap-4 z-50">
+          <AccountDrawer /> 
+          <UserMenu openAuth={openAuth} /> 
+        </div>
+      </div>
+
+      {/* ── GREEN BANNER ── */}
+      <div className="max-w-[1200px] mx-auto px-6 sm:px-12 mt-8 mb-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-green-50/50 border-l-[6px] border-green-600 p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-green-800 text-sm font-black uppercase tracking-wide mb-4 sm:mb-0">
+            <span className="text-xl">🚛</span> 
+            {serviceType === 'trucking' ? 'Trucking Mode: Manual Entry + Precise Map Locations' : 'Courier Mode: AI Box Scanning + Express Shipping'}
           </div>
+
           <button 
             onClick={() => {
               setServiceType(null);
@@ -356,57 +403,20 @@ export default function Home() {
               setCarrierQuotes([]);
               setAllQuotes([]);
               setRouteInfo({ pickupPincode: '', deliveryPincode: '', pickupCoords: undefined, deliveryCoords: undefined });
-              setBookingSuccessData(null); // ✅ Clear Shiprocket Banner
+              setBookingSuccessData(null); 
             }} 
-            className="text-xs font-bold uppercase tracking-widest border-2 border-black px-6 py-2 hover:bg-black hover:text-white transition-all w-fit shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none"
+            className="bg-white text-black border-2 border-black font-black uppercase text-xs px-6 py-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
           >
             ← Switch Service
           </button>
         </div>
+      </div>
 
-        {/* Success Banner if booking goes through */}
-        {/*
-        {bookingSuccessData && (
-          <div className="p-6 bg-gradient-to-r from-green-50 to-blue-50 border-4 border-green-600 rounded-lg animate-in fade-in slide-in-from-top-4 shadow-lg">
-            <div className="flex items-start justify-between mb-4">
-              <h3 className="text-2xl font-black uppercase text-green-800">🎉 Order Created Successfully!</h3>
-              <button 
-                onClick={() => setBookingSuccessData(null)}
-                className="text-2xl text-gray-400 hover:text-gray-600 cursor-pointer">✕</button>
-            </div>
-            
-           
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-bold mb-4">
-              <div className="bg-white p-3 rounded border-2 border-green-200">
-                <p className="text-[10px] text-green-600 uppercase">Order ID</p>
-                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.shiprocket_order_id}</p>
-              </div>
-              <div className="bg-white p-3 rounded border-2 border-green-200">
-                <p className="text-[10px] text-green-600 uppercase">Shipment ID</p>
-                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.shipment_id}</p>
-              </div>
-              <div className="bg-white p-3 rounded border-2 border-blue-200">
-                <p className="text-[10px] text-blue-600 uppercase">AWB Tracking</p>
-                <p className="text-lg font-mono text-gray-900">{bookingSuccessData.awb_tracking_number || 'Pending'}</p>
-              </div>
-              <div className="bg-white p-3 rounded border-2 border-blue-200">
-                <p className="text-[10px] text-blue-600 uppercase">Courier</p>
-                <p className="text-lg text-gray-900">{bookingSuccessData.courier_name || 'TBD'}</p>
-              </div>
-            </div>
-            
-        
-            {bookingSuccessData.message && (
-              <p className="text-sm text-green-700 bg-green-100 p-3 rounded mb-2 font-semibold">✅ {bookingSuccessData.message}</p>
-            )}
-            {bookingSuccessData.awb_note && (
-              <p className="text-sm text-blue-700 bg-blue-100 p-3 rounded font-semibold">📌 {bookingSuccessData.awb_note}</p>
-            )}
-          </div>
-        )}
-        */}
-
+      {/* ── MAIN CONTENT GRID ── */}
+      <div className="max-w-[1200px] mx-auto px-6 sm:px-12 space-y-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          
+          {/* LEFT COLUMN: Inputs */}
           <div className="lg:col-span-7 space-y-6">
             {serviceType === 'courier' ? (
               <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-500">
@@ -449,6 +459,7 @@ export default function Home() {
             {quoteError && <div className="p-4 bg-red-50 border-2 border-red-200 text-red-700 text-sm font-bold">{quoteError}</div>}
           </div>
 
+          {/* RIGHT COLUMN: Results */}
           <div className="lg:col-span-5 sticky top-8">
              <ResultsDashboard 
               result={result} 
@@ -459,20 +470,17 @@ export default function Home() {
               onSelectTruck={handleSelectTruck}
               pickupCoords={routeInfo.pickupCoords}
               deliveryCoords={routeInfo.deliveryCoords}
-              
-              // Shiprocket Banner Props
               bookingSuccessData={bookingSuccessData}
               onClearBooking={() => setBookingSuccessData(null)}
-              
-              // ✅ ADDED: Borzo Banner Props!
               borzoSuccessData={borzoSuccessData}
               onClearBorzoBooking={() => setBorzoSuccessData(null)}
             />
           </div>
+
         </div>
       </div>
 
-      {/* ── BOOKING MODAL ── */}
+      {/* ── MODALS (Must be inside the main parent div) ── */}
       <BookingModal 
         isOpen={isBookingModalOpen} 
         onClose={() => setIsBookingModalOpen(false)} 
@@ -482,13 +490,18 @@ export default function Home() {
         isBooking={isBookingSubmit} 
       />
 
-      {/* ── TRUCK BOOKING MODAL ── */}
       <TruckBookingModal
         isOpen={isTruckModalOpen}
         onClose={() => setIsTruckModalOpen(false)}
         truck={selectedTruck}
         isBooking={isTruckBookingSubmit}
         onConfirm={handleConfirmTruckBooking}
+      />
+
+      <LoginModal 
+        isOpen={isLoginModalOpen} 
+        onClose={() => setIsLoginModalOpen(false)} 
+        initialIntent={authIntent}
       />
 
     </div>

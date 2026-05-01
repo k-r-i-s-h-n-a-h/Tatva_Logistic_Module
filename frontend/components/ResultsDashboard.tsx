@@ -41,7 +41,8 @@ export function ResultsDashboard({
   borzoSuccessData,
   onClearBorzoBooking
 }: ResultsDashboardProps) {
-
+  
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8001";
   const title = mode === 'trucking' ? "Freight Matching Results" : "Shipping Summary";
 
   if (!result) {

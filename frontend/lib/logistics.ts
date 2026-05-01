@@ -7,6 +7,14 @@ export const MATERIAL_MAP = {
   "Plumbing":        ["PVC Pipes (6m/20ft)", "CPVC Fittings", "Water Tanks (Sintax)"],
 };
 
+export const PACKAGING_SHAPES = [
+  "Box",
+  "Flyer / Envelope",
+  "Pallet",
+  "Tube",
+  "Crate"
+];
+
 export const ITEM_STANDARDS: Record<string, { l: number; w: number; h: number; weight: number; unit: string }> = {
   "Cement Sacks (Stackable)":  { l: 60,  w: 40,  h: 15,  weight: 50,   unit: "KG" },
   "Bricks (Bulk)":             { l: 23,  w: 11,  h: 7,   weight: 3.5,  unit: "KG" },
